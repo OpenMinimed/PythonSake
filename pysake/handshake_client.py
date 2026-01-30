@@ -4,7 +4,7 @@ from typing import Optional
 from binascii import hexlify
 from secrets import token_bytes
 
-from sake_crypto import Session, KeyDatabase, KEYDB_G4_CGM
+from pysake.crypto import Session, KeyDatabase, KEYDB_G4_CGM
 
 
 class HandshakeClient:
