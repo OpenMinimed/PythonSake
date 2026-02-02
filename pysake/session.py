@@ -6,6 +6,7 @@ import logging
 from pysake.constants import LOGGER_NAME
 from pysake.keys import KeyDatabase
 from pysake.seqcrypt import SeqCrypt
+from pysake.device_types import DeviceType
 
 class Session():
 
@@ -14,10 +15,10 @@ class Session():
     server_key_db:KeyDatabase
 
     # msg 0
-    server_device_type:int
+    server_device_type:DeviceType
 
     # msg 1
-    client_device_type:int
+    client_device_type:DeviceType
 
     client_key_material:bytes
     client_nonce:bytes
@@ -53,7 +54,7 @@ class Session():
     
     # region helpers
 
-    def __check_payload(self, payload, verifier_static_keys, prover_static_keys, prover_device_type):
+    def __check_payload(self, payload, verifier_static_keys, prover_static_keys, prover_device_type:int):
 
         if prover_static_keys is not None:
             self.log.debug(f"check_payload(): {payload.hex() = }")
@@ -78,8 +79,7 @@ class Session():
                 return True
         
         return False
-    
-    
+     
     @staticmethod
     def _cmac8(client_key_material, server_key_material, derivation_key, handshake_auth_key):
         msg = server_key_material + client_key_material + derivation_key
@@ -104,7 +104,7 @@ class Session():
         if msg[1] != 1: # TODO: what is this
             raise ValueError
         
-        self.server_device_type = msg[0]
+        self.server_device_type = DeviceType(msg[0])
         return
 
     def handshake_1_c(self, msg: bytes):
@@ -112,11 +112,11 @@ class Session():
 
         self.client_key_material = msg[:8]
         self.client_nonce = msg[9:13]
-        self.client_device_type = msg[8]
+        self.client_device_type = DeviceType(msg[8])
 
         # macros for easier access
-        cdt = self.client_device_type
-        sdt = self.server_device_type
+        cdt = self.client_device_type.value
+        sdt = self.server_device_type.value
         ckd = self.client_key_db
         skd = self.server_key_db
         if ckd is None and skd is None:
@@ -124,9 +124,9 @@ class Session():
         
         # try to get the static keys between the two device databases
         static_keys = None
-        if ckd is not None and ckd.local_device_type == cdt:
+        if ckd is not None and ckd.local_device_type.value == cdt:
             static_keys = self.client_static_keys = ckd.remote_devices.get(sdt)
-        if skd is not None and skd.local_device_type == sdt:
+        if skd is not None and skd.local_device_type.value == sdt:
             static_keys = self.server_static_keys = skd.remote_devices.get(cdt)
         if static_keys is None:
             raise KeyError(f"No keys available for client device type {cdt} and server device type {sdt}.")
@@ -188,14 +188,14 @@ class Session():
         self.server_crypt = SeqCrypt(key=key, nonce=nonce, seq=1)
         inner = self.server_crypt.decrypt(msg)[:16]
         self.log.debug(f"handshake_4_s() {inner.hex() = }")
-        return self.__check_payload(inner, self.client_static_keys, self.server_static_keys, self.server_device_type)
+        return self.__check_payload(inner, self.client_static_keys, self.server_static_keys, self.server_device_type.value)
         
     def handshake_5_c(self, msg: bytes) -> bool:
         self._check_len(msg)
 
         inner = self.client_crypt.decrypt(msg)[:-1]
         self.log.debug(f"handshake_5_c(): {inner.hex() = }")
-        return self.__check_payload(inner, self.server_static_keys, self.client_static_keys, self.client_device_type)
+        return self.__check_payload(inner, self.server_static_keys, self.client_static_keys, self.client_device_type.value)
 
 
     # region builders

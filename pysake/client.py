@@ -4,7 +4,9 @@ from typing import Optional
 from binascii import hexlify
 from secrets import token_bytes
 
-from pysake.crypto import Session, KeyDatabase, KEYDB_G4_CGM
+from pysake.session import Session
+from pysake.device_types import DeviceType
+from pysake.keys import KeyDatabase
 
 
 class HandshakeClient:
@@ -23,26 +25,29 @@ class HandshakeClient:
     def __init__(
         self,
         keydb:KeyDatabase,
-        local_device_type: int = 0x08,
-        client_key_material: Optional[bytes] = None,
-        client_nonce: Optional[bytes] = None,
-        client_message: Optional[bytes] = None,
+        local_device_type:DeviceType = DeviceType.PrimaryDisplay,
+        #client_key_material: Optional[bytes] = None,
+        #client_nonce: Optional[bytes] = None,
+        #client_message: Optional[bytes] = None,
     ):
         self.local_device_type = local_device_type
         self.session = Session()
-        #if keydb_bytes is not None:
-        self.session.client_key_database = keydb
-        # pre-seed client material if provided
-        if client_key_material is not None:
-            if len(client_key_material) != 8:
-                raise ValueError("client_key_material must be 8 bytes")
-            self.session.client_key_material = client_key_material
-        if client_nonce is not None:
-            if len(client_nonce) != 4:
-                raise ValueError("client_nonce must be 4 bytes")
-            self.session.client_nonce = client_nonce
+        self.session.client_key_db = keydb
+
+        # # pre-seed client material if provided
+        # if client_key_material is not None:
+        #     if len(client_key_material) != 8:
+        #         raise ValueError("client_key_material must be 8 bytes")
+        #     self.session.client_key_material = client_key_material
+
+        # if client_nonce is not None:
+        #     if len(client_nonce) != 4:
+        #         raise ValueError("client_nonce must be 4 bytes")
+        #     self.session.client_nonce = client_nonce
+        
         # If a full 20-byte client message is given, we'll send it verbatim when asked
-        self._client_message_override = client_message
+      #  self._client_message_override = client_message
+        return
 
     def build_handshake_1(self) -> bytes:
         """Construct a 20-byte client handshake_1 message.
@@ -53,20 +58,20 @@ class HandshakeClient:
           [9:13]  = client_nonce (4B)
           rest    = zeros (or kept from override)
         """
-        if self._client_message_override is not None:
-            cm = self._client_message_override
-            if len(cm) != 20:
-                raise ValueError("client_message override must be 20 bytes")
-            # populate session fields so later steps (auth8) have the data
-            self.session.client_key_material = cm[0:8]
-            self.session.client_device_type = cm[8]
-            self.session.client_nonce = cm[9:13]
-            return cm
+        # if self._client_message_override is not None:
+        #     cm = self._client_message_override
+        #     if len(cm) != 20:
+        #         raise ValueError("client_message override must be 20 bytes")
+        #     # populate session fields so later steps (auth8) have the data
+        #     self.session.client_key_material = cm[0:8]
+        #     self.session.client_device_type = cm[8]
+        #     self.session.client_nonce = cm[9:13]
+        #     return cm
 
-        if self.session.client_key_material is None:
-            self.session.client_key_material = token_bytes(8)
-        if self.session.client_nonce is None:
-            self.session.client_nonce = token_bytes(4)
+        #if self.session.client_key_material is None:
+        self.session.client_key_material = token_bytes(8)
+        #if self.session.client_nonce is None:
+        self.session.client_nonce = token_bytes(4)
 
         msg = bytearray(20)
         msg[0:8] = self.session.client_key_material

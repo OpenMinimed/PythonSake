@@ -2,6 +2,7 @@ from typing import Dict
 import logging
 
 from pysake.constants import LOGGER_NAME
+from pysake.device_types import DeviceType
 
 class StaticKeys:
 
@@ -20,30 +21,53 @@ class StaticKeys:
         parts = [data[i : i + 16] for i in range(0, 80, 16)]
         return StaticKeys(*parts)
 
+    def __repr__(self) -> str:
+        return (
+            f"StaticKeys(derivation_key={self.derivation_key.hex()}, "
+            f"handshake_auth_key={self.handshake_auth_key.hex()}, "
+            f"permit_decrypt_key={self.permit_decrypt_key.hex()}, "
+            f"permit_auth_key={self.permit_auth_key.hex()}, "
+            f"handshake_payload={self.handshake_payload.hex()})"
+        )
+
 
 class KeyDatabase:
 
-    def __init__(self, local_device_type: int, remote_devices: Dict[int, StaticKeys], crc: bytes) -> None:
+    def __init__(self, local_device_type: DeviceType, remote_devices: Dict[DeviceType, StaticKeys], crc: bytes) -> None:
         self.local_device_type = local_device_type
         self.remote_devices = remote_devices
         self.crc = crc
         return
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> KeyDatabase:
-        log = log = logging.getLogger(LOGGER_NAME).getChild("KeyDatabase")
+    def from_bytes(cls, data: bytes) -> "KeyDatabase":
+        log = logging.getLogger(LOGGER_NAME).getChild("KeyDatabase")
         crc = data[0:4]
         n = data[5]
         if len(data) != 6 + 81 * n:
             raise ValueError("invalid keydb length")
-        local_device_type = data[4]
-        log.debug(f"{local_device_type = }")
-        remote_devices: Dict[int, StaticKeys] = {}
+        local_device_type = DeviceType(data[4])
+        log.debug(f"local_device_type = {local_device_type.name}")
+        remote_devices: Dict[DeviceType, StaticKeys] = {}
         for i in range(n):
             p = 6 + 81 * i
-            remote_devices[data[p]] = StaticKeys.from_bytes(data[p + 1 : p + 81])
-        log.debug(f"{list(remote_devices.keys()) = }")
+            dev = DeviceType(data[p])
+            remote_devices[dev] = StaticKeys.from_bytes(data[p + 1 : p + 81])
+        log.debug(f"remote_devices = {[d.name for d in remote_devices.keys()]}")
         return cls(local_device_type=local_device_type, remote_devices=remote_devices, crc=crc)
+
+    def __repr__(self) -> str:
+        if self.remote_devices:
+            remote_entries = ",\n  ".join(
+                f"{dev.name}: {repr(sk)}" for dev, sk in self.remote_devices.items()
+            )
+            remote_block = f"[\n  {remote_entries}\n]"
+        else:
+            remote_block = "[]"
+        return (
+            f"KeyDatabase(local_device_type={self.local_device_type.name}, "
+            f"remote_devices={remote_block}, crc={self.crc.hex()})"
+        )
 
 
 KEYDB_G4_CGM = KeyDatabase.from_bytes(bytes.fromhex("5fe5928308010230f0b50df613f2e429c8c5e8713854add1a69b837235a3e974304d8055ccb397838b90823c73236d6a83dcc9db3a2a939ff16145ca4169ef93a7fa39b20962b05e57413bff8b3d61fce0dfef2c43b326"))
@@ -56,4 +80,8 @@ AVAILABLE_KEYS = [
     KEYDB_PUMP_HARDCODED,
 ]
 
+if __name__ == "__main__":
+    print("\n")
+    for k in AVAILABLE_KEYS:
+        print(k)    
 
