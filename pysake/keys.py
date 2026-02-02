@@ -1,9 +1,6 @@
 from typing import Dict
 import logging
 
-#from pysake.constants import LOGGER_NAME
-LOGGER_NAME = "pysake" # TODO: circular import 
-
 from pysake.device_types import DeviceType
 
 class StaticKeys:
@@ -43,6 +40,9 @@ class KeyDatabase:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "KeyDatabase":
+
+        from pysake.constants import LOGGER_NAME # due to circular imports
+        
         log = logging.getLogger(LOGGER_NAME).getChild("KeyDatabase")
         crc = data[0:4]
         n = data[5]
@@ -89,5 +89,3 @@ if __name__ == "__main__":
         print(k)
         print("\nreverse:\n")
         print(k.reverse())
-
-    
