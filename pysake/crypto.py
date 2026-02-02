@@ -17,88 +17,7 @@ def auth8(client_key_material, server_key_material, derivation_key, handshake_au
     return cobj
 
 
-@dataclass
-class StaticKeys:
-    derivation_key: bytes
-    handshake_auth_key: bytes
-    permit_decrypt_key: bytes
-    permit_auth_key: bytes
-    handshake_payload: bytes
 
-    @staticmethod
-    def from_bytes(data: bytes):
-        return StaticKeys(*[data[i : i + 16] for i in range(0, 80, 16)])
-
-
-@dataclass
-class KeyDatabase:
-    local_device_type: int
-    remote_devices: dict[int, StaticKeys]
-    crc:bytes
-
-    @classmethod
-    def from_bytes(cls, data: bytes):
-        crc = data[0:4]
-        log = SAKE_LOGGER.getChild("from_bytes")
-        n = data[5]
-        if len(data) != 6 + 81 * n:
-            raise ValueError
-        local_device_type = data[4]
-        log.debug(f"{local_device_type = }")
-        remote_devices = {}
-        for i in range(n):
-            p = 6 + 81 * i
-            remote_devices[data[p]] = StaticKeys.from_bytes(data[p + 1 : p + 81])
-        log.debug(f"{remote_devices.keys() = }")
-        return cls(crc=crc, local_device_type=local_device_type, remote_devices=remote_devices)
-
-
-@dataclass
-class SeqCrypt:
-    key: bytes
-    nonce: bytes
-    seq: int # local sequence count
-
-    def __post_init__(self):
-        self.logger = SAKE_LOGGER
-        if len(self.nonce) != 8:
-            raise ValueError
-
-    def decrypt(self, msg):
-        log = self.logger.getChild("decrypt")
-        if len(msg) < 3:
-            raise ValueError("Message length too small!")
-        d = (msg[-3] - self.seq // 2) & 0xFF
-        seq = self.seq + 2 * d
-        log.debug(f"{seq = }, {d = }")
-        nonce = seq.to_bytes(length=5, byteorder="big") + self.nonce
-        cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
-        ciphertext = msg[:-3]
-        log.debug(f"{ciphertext.hex() = }")
-        cobj.update(nonce.ljust(16, b"\0") + ciphertext)
-        log.debug(f"{msg[-2:].hex() = }, {cobj.digest().hex() = }")
-        cobj.verify(msg[-2:] + cobj.digest()[2:4])
-        self.seq = seq + 2
-        return AES.new(self.key, AES.MODE_CTR, nonce=nonce).decrypt(ciphertext)
-
-    def encrypt(self, plaintext: bytes) -> bytes:
-        """Encrypt `plaintext` and produce the on-wire frame: ciphertext || seq_byte || mac_first2bytes
-
-        This mirrors `decrypt` semantics: the on-wire trailer's first byte is `seq//2 & 0xFF`.
-        After producing the frame, the internal `seq` is advanced by 2 (same as on receive).
-        """
-        log = self.logger.getChild("encrypt")
-        seq = self.seq
-        nonce = seq.to_bytes(length=5, byteorder="big") + self.nonce
-        cipher = AES.new(self.key, AES.MODE_CTR, nonce=nonce)
-        ciphertext = cipher.encrypt(plaintext)
-        cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
-        cobj.update(nonce.ljust(16, b"\0") + ciphertext)
-        digest = cobj.digest()
-        trailer = bytes([(seq // 2) & 0xFF]) + digest[:2]
-        self.seq = seq + 2
-        log.debug(f"encrypt: seq={seq} nonce={nonce.hex()} ciphertext={ciphertext.hex()} trailer={trailer.hex()}")
-        return ciphertext + trailer
 
 
 @dataclass
@@ -305,17 +224,4 @@ class Session:
                 return True
         return False
 
-
-
-KEYDB_G4_CGM = KeyDatabase.from_bytes(bytes.fromhex("5fe5928308010230f0b50df613f2e429c8c5e8713854add1a69b837235a3e974304d8055ccb397838b90823c73236d6a83dcc9db3a2a939ff16145ca4169ef93a7fa39b20962b05e57413bff8b3d61fce0dfef2c43b326"))
-
-KEYDB_PUMP_EXTRACTED = KeyDatabase.from_bytes(bytes.fromhex("f75995e70401011bc1bf7cbf36fa1e2367d795ff09211903da6afbe986b650f14179c0e6852e0ce393781078ffc6f51919e2eaefbde69b8eca21e41ab59b881a0bea0286ea91dc7582a86a714e1737f558f0d66dc1895c"))
-
-KEYDB_PUMP_HARDCODED = KeyDatabase.from_bytes(bytes.fromhex("c2cdfdd1040101fce36ed66ef21def3b0763975494b239038ebe8606f79a9bf00d9f11b6db04c7c0434787cbf00d5476289c22288e2105ae40e01391837f9476fa5003895c5a1afe35662a2a6211826af016eebe30e4ba"))
-
-# build dict of previously defined key databases
-AVAILABLE_KEYS = {}
-for k,v in list(vars().items()):
-    if k.startswith("KEYDB_"):
-        AVAILABLE_KEYS[k] = v
 
