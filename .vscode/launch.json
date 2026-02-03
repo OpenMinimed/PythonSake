@@ -15,6 +15,12 @@
             "type": "debugpy",
             "request": "launch",
             "module": "pysake.client"
+        },
+        {
+            "name": "Session debug",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pysake.session"
         }
     ]
 }

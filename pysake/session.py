@@ -142,12 +142,11 @@ class Session():
         # extract the two main keys
         self.derivation_key = static_keys.derivation_key
         self.handshake_auth_key = static_keys.handshake_auth_key
+        self.log(f"handshake_1_c() done, deriv and handshake keys are selected")
         return
 
     def handshake_2_s(self, msg: bytes):
         self.check_len(msg)
-
-        
         server_key_material = msg[8:16]
         server_nonce = msg[16:20]
         auth = self.cmac8(
@@ -158,6 +157,7 @@ class Session():
         )
         received = msg[0:8]
         auth.verify(received)
+        self.log.debug(f"handshake_2_s() verified")
         self.server_key_material = server_key_material
         self.server_nonce = server_nonce
         return
@@ -176,6 +176,7 @@ class Session():
         inner = (
             auth1.digest() + self.server_key_material + self.derivation_key
         )
+
         auth2 = CMAC.new(self.handshake_auth_key, ciphermod=AES, mac_len=8)
         auth2.update(inner)
         received = msg[:8]
@@ -210,14 +211,32 @@ if __name__ == "__main__":
     import logging
     logging.basicConfig(level=logging.DEBUG)
 
-    from pysake.constants import CGM_TEST_KEYDB, CGM_TEST_MSGS
+    from pysake.constants import CGM_TEST_KEYDB, CGM_TEST_MSGS, KEYDB_PUMP_EXTRACTED, PUMP_TEST_MSGS
 
-    sess = Session(client_keydb=CGM_TEST_KEYDB)
+    sess = Session(server_keydb=KEYDB_PUMP_EXTRACTED)
+    #sess = Session(client_keydb=CGM_TEST_KEYDB)
 
-    sess.handshake_0_s(CGM_TEST_MSGS[0])
-    sess.handshake_1_c(CGM_TEST_MSGS[1])
-    sess.handshake_2_s(CGM_TEST_MSGS[2])
-    sess.handshake_3_c(CGM_TEST_MSGS[3])
-    sess.handshake_4_s(CGM_TEST_MSGS[4])
-    sess.handshake_5_c(CGM_TEST_MSGS[5])
+    t0 = [
+        bytes.fromhex("0401b73682a1150c63de6a81da3d630be78c63db"),
+        bytes.fromhex("929df618d923972701b21c2b9ee1661c576c860b"),
+        bytes.fromhex("cfe95cb285876babd43fa36440f70436c8e110e1"),
+        bytes.fromhex("79afcaf3bdd5df72a023c91deebd69c7d63b7c8d"),
+    ]
+
+    t1 = [
+        bytes.fromhex("04010b3bbd9ef16c28457fda7bc81875471b7b9a"),
+        bytes.fromhex("2e4efb0ea9ca6ac8014ef92c6154561adf373840"),
+        bytes.fromhex("61478fbc8920645cf3569a7e4d314810bb6d1e27"),
+        bytes.fromhex("0447278665597687128808b3983856a52042fcd5"),
+    ]
+
+    current = t1
+
+
+    sess.handshake_0_s(current[0])
+    sess.handshake_1_c(current[1])
+    sess.handshake_2_s(current[2])
+    sess.handshake_3_c(current[3])
+    sess.handshake_4_s(current[4])
+    sess.handshake_5_c(current[5])
     print("session test did not crash. this is definitely a good sign! run the client and server tests too!")

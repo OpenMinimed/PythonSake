@@ -24,7 +24,7 @@ CGM_TEST_MSGS = [
 CGM_TEST_KEYDB = KEYDB_G4_CGM
 
 
-__PUMP_TEST_MSGS_1 = [
+__PUMP_TEST_MSGS_1 = [ # 780g_pairing_with_mobile.pcapng
     bytes.fromhex("0401e2f09017a98f9f01cc56492fbacd4576e92b"),
     bytes.fromhex("42060e9f344e9312016ee8854d357f659b6b00ba"),
     bytes.fromhex("fdeeb13d04c3f18d272630ebeabe7c3a4d4d27b9"),
@@ -42,7 +42,7 @@ __PUMP_TEST_MSGS_2 = [
     bytes.fromhex("33f381971e76211eac3bd7cbf680648140001e83"),
 ]
 
-__PUMP_TEST_MSGS_3 = [
+__PUMP_TEST_MSGS_3 = [ # 2022-07-24 pairing-2.ble.decrypted.pcap
     bytes.fromhex("0401cc849f8f1fe9c44db69c284d20563c2624c9"),
     bytes.fromhex("4d2514c0b7993df7012ee651a48ebd27e223cf1b"),
     bytes.fromhex("dffe7eb3ebe76c561760c2f6abc4c66250387645"),
@@ -51,5 +51,5 @@ __PUMP_TEST_MSGS_3 = [
     bytes.fromhex("ebe84f24495c13b3f633d9f0f5e444dc7800edf4")
 ]
 
-PUMP_TEST_MSGS = __PUMP_TEST_MSGS_3
+PUMP_TEST_MSGS = __PUMP_TEST_MSGS_2
 PUMP_TEST_KEYDB = KEYDB_PUMP_EXTRACTED
