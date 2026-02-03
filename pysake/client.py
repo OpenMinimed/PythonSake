@@ -10,9 +10,7 @@ from pysake.session import Session
 from pysake.device_types import DeviceType
 from pysake.keys import KeyDatabase
 from pysake.peer import Peer
-
-DEBUG_KEY = "a579868377f401ae"
-DEBUG_NONCE = "3405ef88"
+from pysake.constants import LOGGER_NAME
 
 class SakeClient(Peer):
 
@@ -28,12 +26,18 @@ class SakeClient(Peer):
         self.local_device_type = local_device_type
         self.session = Session(client_keydb=keydb)
         self.debug = False
+        self.log = logging.getLogger(LOGGER_NAME).getChild(self.__class__.__name__)
         return
     
     def _build_handshake_1_c(self) -> bytes:
         
-        key = token_bytes(8) if not self.debug else bytes.fromhex(DEBUG_KEY)
-        nonce = token_bytes(4) if not self.debug else bytes.fromhex(DEBUG_NONCE)
+        if self.debug:
+            from pysake.constants import CGM_TEST_MSGS
+            key = CGM_TEST_MSGS[1][0:8]
+            nonce = CGM_TEST_MSGS[1][9:13]
+        else:
+            key = token_bytes(8)
+            nonce = token_bytes(4)
 
         self.session.client_key_material = key
         self.session.client_nonce = nonce
@@ -50,7 +54,6 @@ class SakeClient(Peer):
         By protocol only the first 8 bytes are used; filler fills remaining 12 bytes.
         """
 
-        # TODO: this will be none? we need to loop it back
         if None in (self.session.client_key_material, self.session.server_key_material, self.session.derivation_key, self.session.handshake_auth_key):
             raise ValueError("missing session state for computing handshake_3")
         
@@ -62,7 +65,7 @@ class SakeClient(Peer):
         prefix = auth2.digest()
 
         if self.debug:
-            filler = bytes(12)
+            filler = bytes(12) # just be predictable
         else:
             filler = token_bytes(12)
 
@@ -81,7 +84,15 @@ class SakeClient(Peer):
         if len(payload16) != 16 or payload16 is None:
             raise ValueError("payload16 must be 16 bytes")
         
-        plaintext = payload16 + b"\x00"
+        if self.debug:
+            from pysake.constants import CGM_TEST_MSGS
+            expected = CGM_TEST_MSGS[-1][-4]
+            i = self._brute_force_ghost_byte(self.session.client_crypt, payload16, expected)
+            pad = i.to_bytes()
+        else:
+            pad = b"\x00"
+
+        plaintext = payload16 + pad
         return self.session.client_crypt.encrypt(plaintext)
  
 
@@ -107,37 +118,37 @@ class SakeClient(Peer):
             self.increment_stage() # = 4
 
         elif self.get_stage() == 4:
-            self.session.handshake_4_s(input_data)
+            ok = self.session.handshake_4_s(input_data)
+            if not ok:
+                raise RuntimeError("permit failure")
             self.increment_stage() # = 5
 
             toret = self._build_handshake_5_c()
+
             # DO NOT call this when we are a client!
-            # we have already sent it and it shall be performed by the other party
+            # we have already sent it and it shall be performed by the server
             # self.session.handshake_5_c(toret)
+
             self.increment_stage() # = 6
 
         return toret
 
 
 if __name__ == "__main__":
-
     import logging
     logging.basicConfig(level=logging.DEBUG)
   
-    msg0 = bytes.fromhex("02015f0edcd0c2af98705bed6c8172856d860402")
-    msg1_c = bytes.fromhex("a579868377f401ae083405ef88cc0962d6079a04")
-    msg2 = bytes.fromhex("77f3fb85b079310455fd8f47ddaf81ab49defc7b")
-    msg3_c = bytes.fromhex("7f57c1ac4e12d21b46cfaf03f9dbd4877d0a7d76")
-    msg4 = bytes.fromhex("ef54ef03ad398363825fd434e69cd829630056fa")
-    msg5_c = bytes.fromhex("2f22c383cf264fa4ebc5b10dc8a2c8a4b000619e")
+    from pysake.constants import CGM_TEST_KEYDB, CGM_TEST_MSGS
 
-    from pysake.constants import KEYDB_G4_CGM
-
-    client = SakeClient(KEYDB_G4_CGM)
+    client = SakeClient(CGM_TEST_KEYDB)
     client.debug = True
-    for m in [msg0, msg2, msg4]:
+
+    for m in [CGM_TEST_MSGS[0], CGM_TEST_MSGS[2], CGM_TEST_MSGS[4]]:
         out = client.handshake(m)
         print(f"stage # {client.get_stage()}: in = {m.hex()}, out = {out.hex()}")
+    
     print(out.hex())
-    if out:
-        print("last message passes!")
+    if out == CGM_TEST_MSGS[-1]:
+        print("test passes!")
+    else:
+        print("test failed")

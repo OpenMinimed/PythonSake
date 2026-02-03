@@ -19,10 +19,10 @@ class Session():
     server_static_keys:bytes = None
 
     # msg 0
-    server_device_type:DeviceType
+    server_device_type:DeviceType = None
 
     # msg 1
-    client_device_type:DeviceType
+    client_device_type:DeviceType = None
 
     client_key_material:bytes
     client_nonce:bytes
@@ -65,6 +65,8 @@ class Session():
             if payload == prover_static_keys.handshake_payload:
                 self.log.debug("check_permit(): handshake payload match")
                 # TODO add this to return condition??
+            else:
+                self.log.error(f"check_permit(): mismatched 1!")
         
         if verifier_static_keys is not None:
             
@@ -80,6 +82,9 @@ class Session():
             if plain[0] == 0 and plain[1] == prover_device_type:
                 self.log.debug("check_permit(): prover device type match")
                 return True
+            else:
+                self.log.error(f"check_permit(): mismatched 2!")
+
         
         return False
      
@@ -202,14 +207,17 @@ class Session():
 
 if __name__ == "__main__":
 
-    from pysake.constants import KEYDB_G4_CGM
     import logging
     logging.basicConfig(level=logging.DEBUG)
 
-    sess = Session(client_keydb=KEYDB_G4_CGM)
-    sess.handshake_0_s(bytes.fromhex("02015f0edcd0c2af98705bed6c8172856d860402"))
-    sess.handshake_1_c(bytes.fromhex("a579868377f401ae083405ef88cc0962d6079a04"))
-    sess.handshake_2_s(bytes.fromhex("77f3fb85b079310455fd8f47ddaf81ab49defc7b"))
-    sess.handshake_3_c(bytes.fromhex("7f57c1ac4e12d21b46cfaf03f9dbd4877d0a7d76"))
-    sess.handshake_4_s(bytes.fromhex("ef54ef03ad398363825fd434e69cd829630056fa"))
-    sess.handshake_5_c(bytes.fromhex("2f22c383cf264fa4ebc5b10dc8a2c8a4b000619e"))
+    from pysake.constants import CGM_TEST_KEYDB, CGM_TEST_MSGS
+
+    sess = Session(client_keydb=CGM_TEST_KEYDB)
+
+    sess.handshake_0_s(CGM_TEST_MSGS[0])
+    sess.handshake_1_c(CGM_TEST_MSGS[1])
+    sess.handshake_2_s(CGM_TEST_MSGS[2])
+    sess.handshake_3_c(CGM_TEST_MSGS[3])
+    sess.handshake_4_s(CGM_TEST_MSGS[4])
+    sess.handshake_5_c(CGM_TEST_MSGS[5])
+    print("session test did not crash. this is definitely a good sign! run the client and server tests too!")

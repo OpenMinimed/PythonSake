@@ -45,6 +45,7 @@ class KeyDatabase:
         
         log = logging.getLogger(LOGGER_NAME).getChild("KeyDatabase")
         crc = data[0:4]
+        # TODO: add crc check
         n = data[5]
         if len(data) != 6 + 81 * n:
             raise ValueError("invalid keydb length")
