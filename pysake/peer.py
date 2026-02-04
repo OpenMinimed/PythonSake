@@ -17,6 +17,7 @@ class Peer():
         new = self._stage + 1
         log.debug(f"stage increment from {self._stage} to {new}")
         self._stage = new
+        log.debug(f"state = {str(self.session)}")
         return
     
     def get_stage(self) -> int: 
@@ -33,11 +34,16 @@ class Peer():
             pad = bytearray([i])
             test = payload16 + pad
             bak_seq = crypt_obj.seq
+          #  try:
             out = crypt_obj.encrypt(test)
+          #  except Exception as e:
+                #print(e)
+          #      crypt_obj.seq = bak_seq
+          #      continue
             crypt_obj.seq = bak_seq
             if out[-4] == expected:
                 found.append(i)
                 self.log.debug(f"found a ghost byte: {hex(i)}")
         if len(found) != 1:
-            raise Exception("Did not get exactly 1 ghost byte!")
+            raise Exception(f"Did not get exactly 1 ghost byte! len={len(found)}")
         return found[0]

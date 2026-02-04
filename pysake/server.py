@@ -3,9 +3,9 @@ from __future__ import annotations
 from Cryptodome.Cipher import AES
 from Cryptodome.Hash import CMAC
 from secrets import token_bytes
-import sys
 
-from binascii import hexlify
+import logging
+import sys
 
 from pysake.session import Session
 from pysake.device_types import DeviceType
@@ -23,7 +23,7 @@ class SakeServer(Peer):
     def __init__(
         self,
         keydb: KeyDatabase,
-        local_device_type: DeviceType = DeviceType.InsulinPump,
+        local_device_type: DeviceType = DeviceType.MobileApplication,
     ):
         self.local_device_type = local_device_type
         self.session = Session(server_keydb=keydb)
@@ -47,9 +47,6 @@ class SakeServer(Peer):
             server_key_material = token_bytes(8)
             server_nonce = token_bytes(4)
 
-        self.session.server_key_material = server_key_material
-        self.session.server_nonce = server_nonce
-
         # compute auth prefix using same order as Session.cmac8 expects
         auth = self.session.cmac8(self.session.client_key_material, server_key_material, self.session.derivation_key, self.session.handshake_auth_key)
         prefix = auth.digest()
@@ -68,8 +65,6 @@ class SakeServer(Peer):
         msg[1] = 1
         msg[2:] = token_bytes(18)
         return bytes(msg)
-    
-  
 
     def _build_handshake_4_s(self) -> bytes:
         """
@@ -82,21 +77,25 @@ class SakeServer(Peer):
         key = AES.new(self.session.derivation_key, AES.MODE_ECB).encrypt(
             self.session.server_key_material + self.session.client_key_material
         )
-        nonce = self.session.client_nonce + self.session.server_nonce
+        
+        #nonce = self.session.client_nonce + self.session.server_nonce
         # initialize sequence ciphers (match Session.handshake_4_s behavior)
-        self.session.client_crypt = SeqCrypt(key=key, nonce=nonce, seq=0)
-        self.session.server_crypt = SeqCrypt(key=key, nonce=nonce, seq=1)
+        #self.session.client_crypt = SeqCrypt(key=key, nonce=nonce, seq=0)
+        #self.session.server_crypt = SeqCrypt(key=key, nonce=nonce, seq=1)
 
         payload16 = self.session.server_static_keys.handshake_payload
         if len(payload16) != 16 or payload16 is None:
             raise ValueError("payload16 must be 16 bytes")
+
+        self.log.debug(f"4_s() payload is {payload16.hex()}")
     
         if self.debug:
             from pysake.constants import PUMP_TEST_MSGS
             i = self._brute_force_ghost_byte(self.session.server_crypt, payload16, PUMP_TEST_MSGS[-2][-4])
             pad = i.to_bytes()
+            #pad = b"\x00"
         else:
-            pad = b"\x00"
+            pad = b"\x69"
 
         plaintext = payload16 + pad
         return self.session.server_crypt.encrypt(plaintext)
@@ -105,17 +104,26 @@ class SakeServer(Peer):
         self.session.check_len(input_data)
         toret = None
 
+        log = self.log.getChild("handshake")
+
+        log.debug(f">> {input_data.hex()}")
+
+       # log.debug(self.session)
+
         if self.get_stage() == 0:
 
             if input_data != bytes(20):
                 raise ValueError("Please start the process with 20 empty bytes")
-            
+            self.log.debug(f"stage 0 entry...")
             toret = self._build_handshake_0_s()
             self.session.handshake_0_s(toret)
             self.increment_stage()  # = 1
+            log.debug(f"<< {toret.hex()}")
             return toret
 
         if self.get_stage() == 1:
+            self.log.debug(f"stage 1 (and 2) entry...")
+
             self.session.handshake_1_c(input_data)
             self.increment_stage()  # = 2
 
@@ -124,27 +132,37 @@ class SakeServer(Peer):
             # update session state as if this message was handled
             self.session.handshake_2_s(toret)
             self.increment_stage()  # = 3
+            log.debug(f"<< {toret.hex()}")
+            return toret
 
         elif self.get_stage() == 3:
+
+            self.log.debug(f"stage 3 (and 4) entry...")
+
             # process client's handshake_3
             self.session.handshake_3_c(input_data)
             self.increment_stage()  # = 4
 
             # build handshake_4 (server -> client)
             toret = self._build_handshake_4_s()
-            # Do not call handshake_4_s here (that is performed by recipient)
+
+            # DO NOT call this, we only need to verify the payload in 5_c(): 
+            # self.session._create_crypts()
+            #self.session.handshake_4_s(toret)
+
             self.increment_stage()  # = 5
+            log.debug(f"<< {toret.hex()}")
+            return toret
 
         elif self.get_stage() == 5:
             # final client message 5 arrives; verify
             ok = self.session.handshake_5_c(input_data)
             if not ok:
-                raise RuntimeError("permit failure")
-        
+                raise RuntimeError("permit failure")                
             self.increment_stage()
-            toret = None
+            return None
 
-        return toret
+        raise Exception("Handshake should be already done?! what are you doing here")
 
 
 if __name__ == "__main__":
@@ -170,5 +188,8 @@ if __name__ == "__main__":
     
     if last_valid_out == PUMP_TEST_MSGS[4]:
         print("test passed")
+        print(server.session)
+        print(server.session.get_state_checksum())
+
     else:
         print(f"test failed: {last_valid_out.hex()} vs {PUMP_TEST_MSGS[4].hex()}")

@@ -99,7 +99,7 @@ class SakeClient(Peer):
     def handshake(self, input_data: bytes) -> bytes|None:        
         self.session.check_len(input_data)
         toret = None
-
+        
         if self.get_stage() == 0:
 
             self.session.handshake_0_s(input_data)
@@ -108,6 +108,7 @@ class SakeClient(Peer):
             toret = self._build_handshake_1_c()
             self.session.handshake_1_c(toret)
             self.increment_stage() # = 2
+            return toret
 
         elif self.get_stage() == 2:
             self.session.handshake_2_s(input_data)
@@ -115,7 +116,9 @@ class SakeClient(Peer):
 
             toret = self._build_handshake_3_c()
             self.session.handshake_3_c(toret)
+            #self.session._create_crypts()
             self.increment_stage() # = 4
+            return toret
 
         elif self.get_stage() == 4:
             ok = self.session.handshake_4_s(input_data)
@@ -130,8 +133,9 @@ class SakeClient(Peer):
             # self.session.handshake_5_c(toret)
 
             self.increment_stage() # = 6
+            return toret
 
-        return toret
+        return Exception("Invalid stage!")
 
 
 if __name__ == "__main__":
@@ -150,5 +154,7 @@ if __name__ == "__main__":
     print(out.hex())
     if out == CGM_TEST_MSGS[-1]:
         print("test passes!")
+        print(client.session)
+        print(client.session.get_state_checksum())
     else:
         print("test failed")

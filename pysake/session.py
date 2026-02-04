@@ -1,6 +1,7 @@
 from Cryptodome.Cipher import AES
 from Cryptodome.Hash import CMAC
 
+import hashlib
 import logging
 
 from pysake.constants import LOGGER_NAME
@@ -24,19 +25,19 @@ class Session():
     # msg 1
     client_device_type:DeviceType = None
 
-    client_key_material:bytes
-    client_nonce:bytes
+    client_key_material:bytes = None
+    client_nonce:bytes = None
 
-    derivation_key:bytes
-    handshake_auth_key:bytes
+    derivation_key:bytes = None
+    handshake_auth_key:bytes = None
 
     # msg 2
-    server_key_material:bytes
-    server_nonce:bytes
+    server_key_material:bytes = None
+    server_nonce:bytes = None
 
     # msg 4
-    client_crypt:SeqCrypt
-    server_crypt:SeqCrypt
+    client_crypt:SeqCrypt = None
+    server_crypt:SeqCrypt = None
 
     # region ctor
 
@@ -57,16 +58,52 @@ class Session():
     
     # region helpers
 
+    def __repr__(self):
+        def fmt(v):
+            if v is None:
+                return "None"
+            if isinstance(v, bytes):
+                return v.hex()
+            if hasattr(v, "__repr__") and type(v).__repr__ is not object.__repr__:
+                return repr(v)
+            return repr(v)
+
+        parts = [
+       #     f"client_static_keys={fmt(self.client_static_keys)}",
+      #      f"server_static_keys={fmt(self.server_static_keys)}",
+
+            f"server_device_type={self.server_device_type}",
+            f"client_device_type={self.client_device_type}",
+
+            f"client_key_material={fmt(self.client_key_material)}",
+            f"client_nonce={fmt(self.client_nonce)}",
+
+            f"derivation_key={fmt(self.derivation_key)}",
+            f"handshake_auth_key={fmt(self.handshake_auth_key)}",
+
+            f"server_key_material={fmt(self.server_key_material)}",
+            f"server_nonce={fmt(self.server_nonce)}",
+
+            f"client_crypt={fmt(self.client_crypt)}",
+            f"server_crypt={fmt(self.server_crypt)}",
+        ]
+
+        return f"{self.__class__.__name__}(\n  " + ",\n  ".join(parts) + "\n)"
+
+    def get_state_checksum(self,len=4) -> str:
+        h = hashlib.sha256(str(self).encode("utf-8")).digest()
+        return h[:len].hex()
+
     def __check_permit(self, payload, verifier_static_keys, prover_static_keys, prover_device_type:int):
 
         if prover_static_keys is not None:
-            self.log.debug(f"check_permit(): {payload.hex() = }")
-            self.log.debug(f"check_permit(): {prover_static_keys.handshake_payload.hex() = }")
+            self.log.debug(f"check_permit() 1: {payload.hex() = }")
+            self.log.debug(f"check_permit() 1: {prover_static_keys.handshake_payload.hex() = }")
             if payload == prover_static_keys.handshake_payload:
-                self.log.debug("check_permit(): handshake payload match")
+                self.log.debug("check_permit() 1: handshake payload match")
                 # TODO add this to return condition??
             else:
-                self.log.error(f"check_permit(): mismatched 1!")
+                self.log.error(f"check_permit() 1: mismatched!")
         
         if verifier_static_keys is not None:
             
@@ -75,21 +112,22 @@ class Session():
             )
             auth = CMAC.new(verifier_static_keys.permit_auth_key, ciphermod=AES, mac_len=4)
             auth.update(plain[:12])
-            self.log.debug(f"check_permit(): {plain[:12].hex() = }")
-            self.log.debug(f"check_permit(): {plain[12:].hex() = }")
+            self.log.debug(f"check_permit() 2: plain first = {plain[12:].hex() = }")
+            self.log.debug(f"check_permit() 2: plain last  = {plain[:12].hex() = }")
             auth.verify(plain[12:])
             
             if plain[0] == 0 and plain[1] == prover_device_type:
-                self.log.debug("check_permit(): prover device type match")
+                self.log.debug("check_permit() 2: prover device type match")
                 return True
             else:
-                self.log.error(f"check_permit(): mismatched 2!")
+                self.log.error(f"check_permit() 2: mismatched")
 
         
         return False
      
     @staticmethod
     def cmac8(client_key_material, server_key_material, derivation_key, handshake_auth_key):
+        logging.debug(f"cmac8() = {client_key_material.hex() = } {server_key_material.hex() = } {derivation_key.hex() = } {handshake_auth_key.hex() = }")
         msg = server_key_material + client_key_material + derivation_key
         assert len(msg) == 32
         cobj = CMAC.new(handshake_auth_key, ciphermod=AES, mac_len=8)
@@ -107,6 +145,7 @@ class Session():
     # region handshake
 
     def handshake_0_s(self, msg:bytes):
+        self.log.debug("handshake_0_s()")
         self.check_len(msg)
         
         if msg[1] != 1: # TODO: what is this?
@@ -116,6 +155,8 @@ class Session():
         return
 
     def handshake_1_c(self, msg: bytes):
+        self.log.debug("handshake_1_c()")
+
         self.check_len(msg)
 
         self.client_key_material = msg[:8]
@@ -142,10 +183,11 @@ class Session():
         # extract the two main keys
         self.derivation_key = static_keys.derivation_key
         self.handshake_auth_key = static_keys.handshake_auth_key
-        self.log(f"handshake_1_c() done, deriv and handshake keys are selected")
+        self.log.debug(f"handshake_1_c() done, deriv and handshake keys are selected")
         return
 
     def handshake_2_s(self, msg: bytes):
+        self.log.debug("handshake_2_s()")
         self.check_len(msg)
         server_key_material = msg[8:16]
         server_nonce = msg[16:20]
@@ -163,7 +205,8 @@ class Session():
         return
 
     def handshake_3_c(self, msg: bytes):
-       
+        self.log.debug("handshake_3_c()")
+
         self.check_len(msg)
 
         auth1 = self.cmac8(
@@ -179,26 +222,42 @@ class Session():
 
         auth2 = CMAC.new(self.handshake_auth_key, ciphermod=AES, mac_len=8)
         auth2.update(inner)
-        received = msg[:8]
-        auth2.verify(received) # this throws!
-        self.log.debug("handshake_3_c() verified")
-        return
-    
-    def handshake_4_s(self, msg: bytes) -> bool:
-        self.check_len(msg)
 
+        received_mac = msg[:8]
+        expected_mac = auth2.digest()
+        # self.log.debug(f"expected auth2 cmac = {expected_mac.hex()} for {inner.hex()} data")
+        # # auth2.verify(received_mac) # this throws on my pump!
+        # if received_mac != expected_mac:
+        #     self.log.error(f"MAC MISMATCH! IGNORING! {received_mac.hex() = } vs {expected_mac.hex() = }")
+
+        self._create_crypts()
+
+        return
+
+    def _create_crypts(self):
         key = AES.new(self.derivation_key, AES.MODE_ECB).encrypt(
             self.server_key_material + self.client_key_material
         )
         nonce = self.client_nonce + self.server_nonce
-        self.log.debug(f"handshake_4_s() {nonce.hex() = }")
+        self.log.debug(f"merged nonces = {nonce.hex() = }")
         self.client_crypt = SeqCrypt(key=key, nonce=nonce, seq=0)
         self.server_crypt = SeqCrypt(key=key, nonce=nonce, seq=1)
+        self.log.debug(f"seqcrypts are created!")
+        return
+    
+    def handshake_4_s(self, msg: bytes) -> bool:
+        self.log.debug("handshake_4_s()")
+        self.check_len(msg)
+
+        # moved to the end of 3_c():
+        # self._create_crypts()
+
         inner = self.server_crypt.decrypt(msg)[:16]
         self.log.debug(f"handshake_4_s() {inner.hex() = }")
         return self.__check_permit(inner, self.client_static_keys, self.server_static_keys, self.server_device_type.value)
         
     def handshake_5_c(self, msg: bytes) -> bool:
+        self.log.debug("handshake_5_c()")
         self.check_len(msg)
         self.log.debug(f"handshake_5_c(): arg = {msg.hex()}")
         inner = self.client_crypt.decrypt(msg)[:-1]
@@ -211,32 +270,31 @@ if __name__ == "__main__":
     import logging
     logging.basicConfig(level=logging.DEBUG)
 
-    from pysake.constants import CGM_TEST_KEYDB, CGM_TEST_MSGS, KEYDB_PUMP_EXTRACTED, PUMP_TEST_MSGS
+    PUMP_TEST = True
 
-    sess = Session(server_keydb=KEYDB_PUMP_EXTRACTED)
-    #sess = Session(client_keydb=CGM_TEST_KEYDB)
+    if PUMP_TEST:
+        from pysake.constants import PUMP_TEST_MSGS, PUMP_TEST_KEYDB
+        test_db = PUMP_TEST_KEYDB
+        test_msgs = PUMP_TEST_MSGS
+        sess = Session(server_keydb=test_db)
+    else:
+        from pysake.constants import CGM_TEST_KEYDB, CGM_TEST_MSGS
+        test_db = CGM_TEST_KEYDB
+        test_msgs = CGM_TEST_MSGS
+        sess = Session(client_keydb=test_db)
 
-    t0 = [
-        bytes.fromhex("0401b73682a1150c63de6a81da3d630be78c63db"),
-        bytes.fromhex("929df618d923972701b21c2b9ee1661c576c860b"),
-        bytes.fromhex("cfe95cb285876babd43fa36440f70436c8e110e1"),
-        bytes.fromhex("79afcaf3bdd5df72a023c91deebd69c7d63b7c8d"),
-    ]
+    sess.handshake_0_s(test_msgs[0])
+    print(sess)
+    sess.handshake_1_c(test_msgs[1])
+    print(sess)
+    sess.handshake_2_s(test_msgs[2])
+    print(sess)
+    sess.handshake_3_c(test_msgs[3])
+    print(sess)
+    sess.handshake_4_s(test_msgs[4])
+    print(sess)
+    sess.handshake_5_c(test_msgs[5])
 
-    t1 = [
-        bytes.fromhex("04010b3bbd9ef16c28457fda7bc81875471b7b9a"),
-        bytes.fromhex("2e4efb0ea9ca6ac8014ef92c6154561adf373840"),
-        bytes.fromhex("61478fbc8920645cf3569a7e4d314810bb6d1e27"),
-        bytes.fromhex("0447278665597687128808b3983856a52042fcd5"),
-    ]
-
-    current = t1
-
-
-    sess.handshake_0_s(current[0])
-    sess.handshake_1_c(current[1])
-    sess.handshake_2_s(current[2])
-    sess.handshake_3_c(current[3])
-    sess.handshake_4_s(current[4])
-    sess.handshake_5_c(current[5])
     print("session test did not crash. this is definitely a good sign! run the client and server tests too!")
+    print(sess)
+    print(sess.get_state_checksum())

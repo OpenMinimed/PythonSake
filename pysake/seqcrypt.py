@@ -16,6 +16,16 @@ class SeqCrypt:
         self.log = logging.getLogger(LOGGER_NAME).getChild("SeqCrypt")
         return
 
+    def __repr__(self):
+        return (
+            f"SeqCrypt("
+            f"key={self.key.hex()}, "
+            f"nonce={self.nonce.hex()}, "
+            f"seq={self.seq}"
+            f")"
+        )
+
+
     def decrypt(self, msg: bytes) -> bytes:
         if len(msg) < 3:
             raise ValueError("Message length too small!")
@@ -32,7 +42,7 @@ class SeqCrypt:
         log.debug(f"{msg[-2:].hex() = }, {cobj.digest().hex() = }")
         cobj.verify(msg[-2:] + cobj.digest()[2:4])
         self.seq = seq + 2
-        log.debug(f"seq={seq} nonce={nonce.hex()} ciphertext={ciphertext.hex()}")
+        #log.debug(f"seq={seq} nonce={nonce.hex()} ciphertext={ciphertext.hex()}")
         return AES.new(self.key, AES.MODE_CTR, nonce=nonce).decrypt(ciphertext)
     
     def encrypt(self, plaintext: bytes) -> bytes:
@@ -46,6 +56,6 @@ class SeqCrypt:
         digest = cobj.digest()
         trailer = bytes([(seq // 2) & 0xFF]) + digest[:2]
         self.seq = seq + 2
-        log.debug(f"encrypt: seq={seq} nonce={nonce.hex()} ciphertext={ciphertext.hex()} trailer={trailer.hex()}")
+        #log.debug(f"encrypt: seq={seq} nonce={nonce.hex()} ciphertext={ciphertext.hex()} trailer={trailer.hex()}")
         return ciphertext + trailer
     
