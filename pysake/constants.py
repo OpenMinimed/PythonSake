@@ -33,7 +33,7 @@ __PUMP_TEST_MSGS_1 = [ # 780g_pairing_with_mobile.pcapng
     bytes.fromhex("9b36f393b296fa84a757809859fc84a5c300d59b")
 ]
 
-__PUMP_TEST_MSGS_2 = [
+__PUMP_TEST_MSGS_2 = [ # 2022-07-24 pairing-4.ble.decrypted.pcap
     bytes.fromhex("040131395205055606f9f7dcd6b257cde879d1d8"),
     bytes.fromhex("2a449f70b5156ed301406b185dd3d2d8ae976776"),
     bytes.fromhex("9c87e425cb9835c816242ce1133fd03904195c3e"),
