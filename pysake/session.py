@@ -227,8 +227,8 @@ class Session():
         expected_mac = auth2.digest()
         # self.log.debug(f"expected auth2 cmac = {expected_mac.hex()} for {inner.hex()} data")
         # # auth2.verify(received_mac) # this throws on my pump!
-        # if received_mac != expected_mac:
-        #     self.log.error(f"MAC MISMATCH! IGNORING! {received_mac.hex() = } vs {expected_mac.hex() = }")
+        if received_mac != expected_mac:
+            self.log.error(f"MAC MISMATCH! IGNORING! {received_mac.hex() = } vs {expected_mac.hex() = }")
 
         self._create_crypts()
 
