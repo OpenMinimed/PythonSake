@@ -47,6 +47,10 @@ class SakeServer(Peer):
             server_key_material = token_bytes(8)
             server_nonce = token_bytes(4)
 
+        # NOTE: this seems to have been removed accidentally, but we need it
+        self.session.server_key_material = server_key_material
+        self.session.server_nonce        = server_nonce
+
         # compute auth prefix using same order as Session.cmac8 expects
         auth = self.session.cmac8(self.session.client_key_material, server_key_material, self.session.derivation_key, self.session.handshake_auth_key)
         prefix = auth.digest()
@@ -78,6 +82,7 @@ class SakeServer(Peer):
             self.session.server_key_material + self.session.client_key_material
         )
         
+        # NOTE: we do this in session.handshake_3_c() instead
         #nonce = self.session.client_nonce + self.session.server_nonce
         # initialize sequence ciphers (match Session.handshake_4_s behavior)
         #self.session.client_crypt = SeqCrypt(key=key, nonce=nonce, seq=0)
