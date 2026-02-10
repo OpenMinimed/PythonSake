@@ -5,7 +5,7 @@ import hashlib
 import logging
 
 from pysake.constants import LOGGER_NAME
-from pysake.keys import KeyDatabase
+from pysake.keys import KeyDatabase, StaticKeys
 from pysake.seqcrypt import SeqCrypt
 from pysake.device_types import DeviceType
 
@@ -16,8 +16,8 @@ class Session():
     server_key_db:KeyDatabase = None
 
     # permit
-    client_static_keys:bytes = None
-    server_static_keys:bytes = None
+    client_static_keys:StaticKeys = None
+    server_static_keys:StaticKeys = None
 
     # msg 0
     server_device_type:DeviceType = None
@@ -112,6 +112,7 @@ class Session():
             )
             auth = CMAC.new(verifier_static_keys.permit_auth_key, ciphermod=AES, mac_len=4)
             auth.update(plain[:12])
+            self.log.debug(f"check_permit() 2: payload = {payload.hex()}")
             self.log.debug(f"check_permit() 2: plain first = {plain[12:].hex() = }")
             self.log.debug(f"check_permit() 2: plain last  = {plain[:12].hex() = }")
             auth.verify(plain[12:])
