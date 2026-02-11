@@ -227,9 +227,12 @@ class Session():
         received_mac = msg[:8]
         expected_mac = auth2.digest()
         # self.log.debug(f"expected auth2 cmac = {expected_mac.hex()} for {inner.hex()} data")
-        # # auth2.verify(received_mac) # this throws on my pump!
-        if received_mac != expected_mac:
-            self.log.error(f"MAC MISMATCH! IGNORING! {received_mac.hex() = } vs {expected_mac.hex() = }")
+        
+        # die here if we get mac error! the device might send us random garbage intentionally if we did something wrong!
+        auth2.verify(received_mac) 
+        
+        #if received_mac != expected_mac:
+        #    self.log.error(f"MAC MISMATCH! IGNORING! {received_mac.hex() = } vs {expected_mac.hex() = }")
 
         self._create_crypts()
 
