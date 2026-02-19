@@ -47,9 +47,9 @@ class SakeServer(Peer):
             server_key_material = token_bytes(8)
             server_nonce = token_bytes(4)
 
-        # NOTE: this seems to have been removed accidentally, but we need it
-        self.session.server_key_material = server_key_material
-        self.session.server_nonce        = server_nonce
+        # NOTE: we dont need these, since it is performed by handshake_2_s()
+        # self.session.server_key_material = server_key_material
+        # self.session.server_nonce        = server_nonce
 
         # compute auth prefix using same order as Session.cmac8 expects
         auth = self.session.cmac8(self.session.client_key_material, server_key_material, self.session.derivation_key, self.session.handshake_auth_key)
@@ -118,7 +118,7 @@ class SakeServer(Peer):
         if self.get_stage() == 0:
 
             if input_data != bytes(20):
-                raise ValueError("Please start the process with 20 empty bytes")
+                raise ValueError("Please start the process with 20 zero bytes")
             self.log.debug(f"stage 0 entry...")
             toret = self._build_handshake_0_s()
             self.session.handshake_0_s(toret)
