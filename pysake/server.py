@@ -165,6 +165,12 @@ class SakeServer(Peer):
             if not ok:
                 raise RuntimeError("permit failure")                
             self.increment_stage()
+            
+            # restart the sequence numbers after a successful pairing
+            # TODO: move this somewhere else
+            self.session.client_crypt.seq = 0
+            self.session.server_crypt.seq = 0
+            
             return None
 
         raise Exception("Handshake should be already done?! what are you doing here")
