@@ -168,8 +168,10 @@ class SakeServer(Peer):
             
             # restart the sequence numbers after a successful pairing
             # TODO: move this somewhere else
-            self.session.client_crypt.seq = 0
-            self.session.server_crypt.seq = 0
+
+            logging.debug("SET RX SEQ!!!!")
+            self.session.client_crypt.rx_seq = 1 # ???
+            self.session.server_crypt.rx_seq = 1
             
             return None
 
