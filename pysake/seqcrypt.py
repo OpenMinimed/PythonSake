@@ -40,7 +40,7 @@ class SeqCrypt:
 
         seq_byte = msg[-3]
         d = (seq_byte - (self.rx_seq // 2)) & 0xFF
-        seq = self.rx_seq + d
+        seq = self.rx_seq + 2*d
         log.debug(f"local rx seq={self.rx_seq}, delta={d}, seq = {seq}")
         nonce = seq.to_bytes(length=5, byteorder="big") + self.nonce
         cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
