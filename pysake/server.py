@@ -170,8 +170,8 @@ class SakeServer(Peer):
             # TODO: move this somewhere else
 
             logging.debug("SET RX SEQ!!!!")
-            self.session.client_crypt.rx_seq = 1 # ???
-            self.session.server_crypt.rx_seq = 1
+            #self.session.client_crypt.rx_seq = 1 # ???
+            self.session.server_crypt.rx_seq = 2
             
             return None
 
