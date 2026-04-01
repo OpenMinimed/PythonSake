@@ -54,28 +54,24 @@ class SeqCrypt:
             f"decrypt: seq={seq}, nonce={nonce.hex()}, ciphertext_len={len(ciphertext)}, "
             f"received_mac={msg[-2:].hex()}, computed_mac={digest.hex()}, next_rx_seq={next}"
         )
+        
+        # set seq here so we can potentially continue the session even in case of mac failure
+        self.rx_seq += next
 
         # Only the first two bytes of the CMAC are transmitted; compare those.
         if digest[:2] != msg[-2:]:
 
             recv_mac = msg[-2:]
-            matches = self.__bruteforce_seq_matches(ciphertext, recv_mac, limit=1024)
-            if matches:
-                log.debug(
-                    f"MAC mismatch: computed_mac={digest.hex()}, received={recv_mac.hex()}, "
-                    f"possible_seq_matches={matches} (showing up to 10)"
-                )
-            else:
-                log.debug(
-                    f"MAC mismatch: computed_mac={digest.hex()}, received={recv_mac.hex()}, "
-                    f"no matching seq found in first 1024 candidates starting at 0"
-                )
-            self.rx_seq += 1 # recover!?
+            match = self.__bruteforce_seq(ciphertext, recv_mac)
+            log.debug(
+                f"MAC mismatch: computed_mac={digest.hex()}, received={recv_mac.hex()}, "
+                f"brute forced valid match={match if match is not None else 'not found'}"
+            )
             raise ValueError("MAC verification failed")
         
-        self.rx_seq = next # only set it if everything (mac) goes right
+        self.rx_seq = next
         plaintext = AES.new(self.key, AES.MODE_CTR, nonce=nonce).decrypt(ciphertext)
-        log.debug("decrypt ok")
+        log.debug(f"decrypt ok {msg.hex()} -> {plaintext.hex()}")
         return plaintext
     
     def encrypt(self, plaintext: bytes) -> bytes:
@@ -87,29 +83,26 @@ class SeqCrypt:
         cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
         cobj.update(nonce.ljust(16, b"\0") + ciphertext)
         digest = cobj.digest()
-        trailer = bytes([(seq // 2) & 0xFF]) + digest[:2]
+        # since we internally keep track of the count, we dont need to handle the wraparound using the 'delta' variable, like in the decrypt
+        trailer = bytes([(seq // 2) & 0xFF]) + digest[:2] 
         self.tx_seq = seq + 2
-        #self.rx_seq += 1
+        toret = ciphertext + trailer
         log.debug(
             f"encrypt done: seq={seq}, nonce={nonce.hex()}, ciphertext_len={len(ciphertext)}, "
-            f"computed_mac={digest.hex()}, trailer={trailer.hex()}, next_tx_seq={self.tx_seq}"
+            f"computed_mac={digest.hex()}, trailer={trailer.hex()}, next_tx_seq={self.tx_seq}: {plaintext.hex()} -> {toret.hex()}"
         )
-        return ciphertext + trailer
+        return toret
 
-    def __bruteforce_seq_matches(self, ciphertext: bytes, recv_mac: bytes, limit: int = 1024) -> list:
-        """Private debug helper: brute-force the first `limit` sequence values
-        starting from 0 and return a list of seq values whose CMAC prefix matches
-        `recv_mac`. Sequence values tested are 0,1,2,... (limit entries).
+    def __bruteforce_seq(self, ciphertext: bytes, recv_mac: bytes, limit: int = 260) -> int | None:
         """
-        matches = []
+        Brute-force the first valid sequence value for debugging reasons.
+        """
         for i in range(limit):
             seq_try = i
             nonce_try = seq_try.to_bytes(length=5, byteorder="big") + self.nonce
             cobj_try = CMAC.new(self.key, ciphermod=AES, mac_len=4)
             cobj_try.update(nonce_try.ljust(16, b"\0") + ciphertext)
             if cobj_try.digest()[:2] == recv_mac:
-                matches.append(seq_try)
-                if len(matches) >= 10:
-                    break
-        return matches
+                return seq_try
+        return None
     
