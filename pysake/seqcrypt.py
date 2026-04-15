@@ -41,7 +41,7 @@ class SeqCrypt:
         seq_byte = msg[-3]
         d = (seq_byte - (self.rx_seq // 2)) & 0xFF
         seq = self.rx_seq + 2*d
-        log.debug(f"local rx seq={self.rx_seq}, delta={d}, seq = {seq}")
+        log.debug(f"current seq = {seq}, local rx seq={self.rx_seq}, delta={d}")
         nonce = seq.to_bytes(length=5, byteorder="big") + self.nonce
         cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
         ciphertext = msg[:-3]
@@ -67,6 +67,9 @@ class SeqCrypt:
                 f"MAC mismatch: computed_mac={digest.hex()}, received={recv_mac.hex()}, "
                 f"brute forced valid match={match if match is not None else 'not found'}"
             )
+            self.rx_seq = match + 2
+            log.warning(f"recovering brute forced {self.rx_seq = }")
+
             raise ValueError("MAC verification failed")
         
         self.rx_seq = next
