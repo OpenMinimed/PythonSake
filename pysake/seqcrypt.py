@@ -95,7 +95,8 @@ class SeqCrypt:
                     f"MAC mismatch: computed_mac={digest.hex()}, received={recv_mac.hex()}, "
                     f"no matching seq found around rx_seq={self.rx_seq}"
                 )
-            self.rx_seq = next
+            # DO NOT do this: (see https://github.com/OpenMinimed/JavaSake/pull/2)
+            # self.rx_seq = next
             raise ValueError("MAC verification failed")
         
         self.rx_seq = next
