@@ -62,7 +62,7 @@ class SeqCrypt:
         seq_byte = msg[-3]
         d = (seq_byte - (self.rx_seq // 2)) & 0xFF
         seq = self.rx_seq + 2*d
-        log.debug(f"local rx seq={self.rx_seq}, delta={d}, seq = {seq}")
+        log.debug(f"current seq = {seq}, local rx seq={self.rx_seq}, delta={d}")
         nonce = seq.to_bytes(length=5, byteorder="big") + self.nonce
         cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
         ciphertext = msg[:-3]
@@ -76,6 +76,9 @@ class SeqCrypt:
             f"decrypt: seq={seq}, nonce={nonce.hex()}, ciphertext_len={len(ciphertext)}, "
             f"received_mac={msg[-2:].hex()}, computed_mac={digest.hex()}, next_rx_seq={next}"
         )
+        
+        # set seq here so we can potentially continue the session even in case of mac failure
+        self.rx_seq += next
 
         # Only the first two bytes of the CMAC are transmitted; compare those.
         if digest[:2] != msg[-2:]:
@@ -95,9 +98,9 @@ class SeqCrypt:
             self.rx_seq = next
             raise ValueError("MAC verification failed")
         
-        self.rx_seq = next # only set it if everything (mac) goes right
+        self.rx_seq = next
         plaintext = AES.new(self.key, AES.MODE_CTR, nonce=nonce).decrypt(ciphertext)
-        log.debug("decrypt ok")
+        log.debug(f"decrypt ok {msg.hex()} -> {plaintext.hex()}")
         return plaintext
 
     def encrypt(self, plaintext: bytes) -> bytes:
@@ -110,14 +113,15 @@ class SeqCrypt:
         cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
         cobj.update(nonce.ljust(16, b"\0") + ciphertext)
         digest = cobj.digest()
-        trailer = bytes([(seq // 2) & 0xFF]) + digest[:2]
+        # since we internally keep track of the count, we dont need to handle the wraparound using the 'delta' variable, like in the decrypt
+        trailer = bytes([(seq // 2) & 0xFF]) + digest[:2] 
         self.tx_seq = seq + 2
-        #self.rx_seq += 1
+        toret = ciphertext + trailer
         log.debug(
             f"encrypt done: seq={seq}, nonce={nonce.hex()}, ciphertext_len={len(ciphertext)}, "
-            f"computed_mac={digest.hex()}, trailer={trailer.hex()}, next_tx_seq={self.tx_seq}"
+            f"computed_mac={digest.hex()}, trailer={trailer.hex()}, next_tx_seq={self.tx_seq}: {plaintext.hex()} -> {toret.hex()}"
         )
-        return ciphertext + trailer
+        return toret
 
     def __bruteforce_seq_matches(self, ciphertext: bytes, recv_mac: bytes, center: int, limit: int = 1024) -> int | None:
         """
