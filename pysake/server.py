@@ -165,13 +165,16 @@ class SakeServer(Peer):
             if not ok:
                 raise RuntimeError("permit failure")                
             self.increment_stage()
-            
-            # restart the sequence numbers after a successful pairing
-            # TODO: move this somewhere else
 
-            logging.debug("SET RX SEQ!!!!")
-            #self.session.client_crypt.rx_seq = 1 # ???
-            self.session.server_crypt.rx_seq = 2
+            # After handshake: server_crypt.tx_seq=3 → seq//2=1,
+            # but rx_seq is still 1 → seq//2=0. Reset rx_seq to 2
+            # so both halves agree (seq//2=1), matching the native
+            # shared-counter model where send and receive advance together.
+
+            before = self.session.server_crypt.rx_seq
+            after = 2
+            self.session.server_crypt.rx_seq = after
+            logging.debug(f"Set server rx_seq from {before} to {after}")
             
             return None
 

@@ -6,6 +6,28 @@ from Cryptodome.Cipher import AES
 from Cryptodome.Hash import CMAC
 
 class SeqCrypt:
+    """
+    CTR + CMAC encrypt/decrypt per message direction.
+
+    Native library model (libandroid-sake-lib_v210.so):
+      - Single 64-bit counter per SAKE_SECURE_LINK_S, +1 per msg
+      - CTR nonce encodes: (mode & 1) | (counter << 1) as 5-byte big-endian
+      - Wire trailer byte: counter & 0xFF
+      - mode=0 for client, mode=1 for server
+
+    Python model (this class):
+      - Separate tx_seq (send) and rx_seq (receive), +2 per msg
+      - CTR nonce: seq.to_bytes(5, 'big')
+      - Wire trailer byte: (seq // 2) & 0xFF
+      - Client starts at seq=0, server at seq=1
+
+    Mapping:  Python seq = native_counter * 2 + mode
+              native_counter = seq // 2
+              mode = seq & 1  (0=client, 1=server)
+
+    The step of +2 and the halved wire byte exactly compensate
+    for the native +1 with mode bit baked into the nonce.
+    """
 
     def __init__(self, key: bytes, nonce: bytes, seq: int):
         self.key = key
@@ -31,12 +53,11 @@ class SeqCrypt:
         if len(msg) < 3:
             raise ValueError("Message length too small!")
 
-        log = self.log.getChild("decrypt")       
+        log = self.log.getChild("decrypt")
 
-        # The trailer contains a 1-byte sequence field equal to (seq//2) & 0xFF.
-        # We reconstruct the full 32-bit seq by treating the received byte as
-        # an offset (delta) from the current `rx_seq` // 2 value. `d` is that
-        # delta in 0..255. This handles wrap-around of the low 8-bit field.
+        # Wire byte = (seq // 2) & 0xFF  (= native counterLow & 0xFF)
+        # Reconstruct delta from halved wire byte, then full seq.
+        # Equivalent to native: delta = (seqByte - counterLow) & 0xFF
 
         seq_byte = msg[-3]
         d = (seq_byte - (self.rx_seq // 2)) & 0xFF
@@ -49,7 +70,8 @@ class SeqCrypt:
         cobj.update(nonce.ljust(16, b"\0") + ciphertext)
         digest = cobj.digest()
 
-        next = seq + 2
+        next = seq + 2 # = native (counter+1) * 2 + mode
+
         log.debug(
             f"decrypt: seq={seq}, nonce={nonce.hex()}, ciphertext_len={len(ciphertext)}, "
             f"received_mac={msg[-2:].hex()}, computed_mac={digest.hex()}, next_rx_seq={next}"
@@ -59,29 +81,30 @@ class SeqCrypt:
         if digest[:2] != msg[-2:]:
 
             recv_mac = msg[-2:]
-            matches = self.__bruteforce_seq_matches(ciphertext, recv_mac, limit=1024)
-            if matches:
+            found = self.__bruteforce_seq_matches(ciphertext, recv_mac, self.rx_seq)
+            if found is not None:
                 log.debug(
                     f"MAC mismatch: computed_mac={digest.hex()}, received={recv_mac.hex()}, "
-                    f"possible_seq_matches={matches} (showing up to 10)"
+                    f"found_seq={found} near rx_seq={self.rx_seq}"
                 )
             else:
                 log.debug(
                     f"MAC mismatch: computed_mac={digest.hex()}, received={recv_mac.hex()}, "
-                    f"no matching seq found in first 1024 candidates starting at 0"
+                    f"no matching seq found around rx_seq={self.rx_seq}"
                 )
-            self.rx_seq += 1 # recover!?
+            self.rx_seq = next
             raise ValueError("MAC verification failed")
         
         self.rx_seq = next # only set it if everything (mac) goes right
         plaintext = AES.new(self.key, AES.MODE_CTR, nonce=nonce).decrypt(ciphertext)
         log.debug("decrypt ok")
         return plaintext
-    
+
     def encrypt(self, plaintext: bytes) -> bytes:
         seq = self.tx_seq
-        log = self.log.getChild("encrypt")        
+        log = self.log.getChild("encrypt")
         nonce = seq.to_bytes(length=5, byteorder="big") + self.nonce
+        # seq.to_bytes(5) = native (mode | counter<<1) as 5-byte big-endian
         cipher = AES.new(self.key, AES.MODE_CTR, nonce=nonce)
         ciphertext = cipher.encrypt(plaintext)
         cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
@@ -96,20 +119,21 @@ class SeqCrypt:
         )
         return ciphertext + trailer
 
-    def __bruteforce_seq_matches(self, ciphertext: bytes, recv_mac: bytes, limit: int = 1024) -> list:
-        """Private debug helper: brute-force the first `limit` sequence values
-        starting from 0 and return a list of seq values whose CMAC prefix matches
-        `recv_mac`. Sequence values tested are 0,1,2,... (limit entries).
+    def __bruteforce_seq_matches(self, ciphertext: bytes, recv_mac: bytes, center: int, limit: int = 1024) -> int | None:
         """
-        matches = []
-        for i in range(limit):
-            seq_try = i
+        Search for a seq whose CMAC prefix matches recv_mac,
+        centered around `center` within +- limit/2 range. Returns the
+        first matching seq or None.
+        """
+        half = limit // 2
+        for offset in range(-half, half + 1):
+            seq_try = center + offset
+            if seq_try < 0:
+                continue
             nonce_try = seq_try.to_bytes(length=5, byteorder="big") + self.nonce
             cobj_try = CMAC.new(self.key, ciphermod=AES, mac_len=4)
             cobj_try.update(nonce_try.ljust(16, b"\0") + ciphertext)
             if cobj_try.digest()[:2] == recv_mac:
-                matches.append(seq_try)
-                if len(matches) >= 10:
-                    break
-        return matches
+                return seq_try
+        return None
     
