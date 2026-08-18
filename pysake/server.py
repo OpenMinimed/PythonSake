@@ -207,6 +207,9 @@ if __name__ == "__main__":
         print("test passed")
         print(server.session)
         print(server.session.get_state_checksum())
+        exit(0)
 
     else:
         print(f"test failed: {last_valid_out.hex()} vs {PUMP_TEST_MSGS[4].hex()}")
+        exit(-1)
+

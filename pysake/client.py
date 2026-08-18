@@ -156,5 +156,8 @@ if __name__ == "__main__":
         print("test passes!")
         print(client.session)
         print(client.session.get_state_checksum())
+        exit(0)
     else:
         print("test failed")
+        exit(-1)
+
