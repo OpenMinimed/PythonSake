@@ -68,12 +68,20 @@ class Session():
                 return repr(v)
             return repr(v)
 
+        sdt = ""
+        if self.server_device_type in DeviceType._value2member_map_:
+            sdt = f" ({DeviceType(self.server_device_type).name})"
+
+        cdt = ""
+        if self.client_device_type in DeviceType._value2member_map_:
+            cdt = f" ({DeviceType(self.client_device_type).name})"
+
         parts = [
        #     f"client_static_keys={fmt(self.client_static_keys)}",
       #      f"server_static_keys={fmt(self.server_static_keys)}",
 
-            f"server_device_type  = {self.server_device_type}",
-            f"client_device_type  = {self.client_device_type}",
+            f"server_device_type  = {self.server_device_type}{sdt}",
+            f"client_device_type  = {self.client_device_type}{cdt}",
 
             f"client_key_material = {fmt(self.client_key_material)}",
             f"client_nonce        = {fmt(self.client_nonce)}",
