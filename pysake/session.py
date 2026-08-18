@@ -72,20 +72,20 @@ class Session():
        #     f"client_static_keys={fmt(self.client_static_keys)}",
       #      f"server_static_keys={fmt(self.server_static_keys)}",
 
-            f"server_device_type={self.server_device_type}",
-            f"client_device_type={self.client_device_type}",
+            f"server_device_type  = {self.server_device_type}",
+            f"client_device_type  = {self.client_device_type}",
 
-            f"client_key_material={fmt(self.client_key_material)}",
-            f"client_nonce={fmt(self.client_nonce)}",
+            f"client_key_material = {fmt(self.client_key_material)}",
+            f"client_nonce        = {fmt(self.client_nonce)}",
 
-            f"derivation_key={fmt(self.derivation_key)}",
-            f"handshake_auth_key={fmt(self.handshake_auth_key)}",
+            f"derivation_key      = {fmt(self.derivation_key)}",
+            f"handshake_auth_key  = {fmt(self.handshake_auth_key)}",
 
-            f"server_key_material={fmt(self.server_key_material)}",
-            f"server_nonce={fmt(self.server_nonce)}",
+            f"server_key_material = {fmt(self.server_key_material)}",
+            f"server_nonce        = {fmt(self.server_nonce)}",
 
-            f"client_crypt={fmt(self.client_crypt)}",
-            f"server_crypt={fmt(self.server_crypt)}",
+            f"client_crypt        = {fmt(self.client_crypt)}",
+            f"server_crypt        = {fmt(self.server_crypt)}",
         ]
 
         return f"{self.__class__.__name__}(\n  " + ",\n  ".join(parts) + "\n)"
