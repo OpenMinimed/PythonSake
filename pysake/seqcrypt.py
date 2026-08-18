@@ -62,7 +62,7 @@ class SeqCrypt:
         seq_byte = msg[-3]
         d = (seq_byte - (self.rx_seq // 2)) & 0xFF
         seq = self.rx_seq + 2*d
-        log.debug(f"current seq = {seq}, local rx seq={self.rx_seq}, delta={d}")
+        log.debug(f"current seq = {seq}, local rx seq = {self.rx_seq}, delta = {d}")
         nonce = seq.to_bytes(length=5, byteorder="big") + self.nonce
         cobj = CMAC.new(self.key, ciphermod=AES, mac_len=4)
         ciphertext = msg[:-3]
@@ -101,7 +101,7 @@ class SeqCrypt:
         
         self.rx_seq = next
         plaintext = AES.new(self.key, AES.MODE_CTR, nonce=nonce).decrypt(ciphertext)
-        log.debug(f"decrypt ok {msg.hex()} -> {plaintext.hex()}")
+        log.debug(f"decrypt done: {msg.hex()} -> {plaintext.hex()}")
         return plaintext
 
     def encrypt(self, plaintext: bytes) -> bytes:
@@ -119,9 +119,10 @@ class SeqCrypt:
         self.tx_seq = seq + 2
         toret = ciphertext + trailer
         log.debug(
-            f"encrypt done: seq={seq}, nonce={nonce.hex()}, ciphertext_len={len(ciphertext)}, "
-            f"computed_mac={digest.hex()}, trailer={trailer.hex()}, next_tx_seq={self.tx_seq}: {plaintext.hex()} -> {toret.hex()}"
+            f"seq={seq}, nonce={nonce.hex()}, ciphertext_len={len(ciphertext)}, "
+            f"computed_mac={digest.hex()}, trailer={trailer.hex()}, next_tx_seq={self.tx_seq}"
         )
+        log.debug(f"encrypt done: {plaintext.hex()} -> {toret.hex()}")
         return toret
 
     def __bruteforce_seq_matches(self, ciphertext: bytes, recv_mac: bytes, center: int, limit: int = 1024) -> int | None:
@@ -141,4 +142,4 @@ class SeqCrypt:
             if cobj_try.digest()[:2] == recv_mac:
                 return seq_try
         return None
-    
+

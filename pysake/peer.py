@@ -8,16 +8,16 @@ class Peer():
     """
 
     _stage:int = 0
+    log = logging.getLogger(LOGGER_NAME).getChild("Peer")
 
     def __init__(self):
         pass
 
     def increment_stage(self):
-        log = logging.getLogger(LOGGER_NAME).getChild("Peer")
         new = self._stage + 1
-        log.debug(f"stage increment from {self._stage} to {new}")
+        self.log.debug(f"advancing from handshake stage {self._stage} to {new}")
         self._stage = new
-        log.debug(f"state = {str(self.session)}")
+        self.log.debug(f"state = {str(self.session)}")
         return
     
     def get_stage(self) -> int: 

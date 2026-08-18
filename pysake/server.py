@@ -109,7 +109,7 @@ class SakeServer(Peer):
         self.session.check_len(input_data)
         toret = None
 
-        log = self.log.getChild("handshake")
+        log = self.log.getChild("handshake()")
 
         log.debug(f">> {input_data.hex()}")
 
@@ -119,7 +119,7 @@ class SakeServer(Peer):
 
             if input_data != bytes(20):
                 raise ValueError("Please start the process with 20 zero bytes")
-            self.log.debug(f"stage 0 entry...")
+            log.debug(f"Entering handshake stage 0 ...")
             toret = self._build_handshake_0_s()
             self.session.handshake_0_s(toret)
             self.increment_stage()  # = 1
@@ -127,7 +127,7 @@ class SakeServer(Peer):
             return toret
 
         if self.get_stage() == 1:
-            self.log.debug(f"stage 1 (and 2) entry...")
+            log.debug(f"Entering handshake stage 1 (and 2) ...")
 
             self.session.handshake_1_c(input_data)
             self.increment_stage()  # = 2
@@ -141,8 +141,7 @@ class SakeServer(Peer):
             return toret
 
         elif self.get_stage() == 3:
-
-            self.log.debug(f"stage 3 (and 4) entry...")
+            log.debug(f"Entering handshake stage 3 (and 4) ...")
 
             # process client's handshake_3
             self.session.handshake_3_c(input_data)
@@ -160,6 +159,8 @@ class SakeServer(Peer):
             return toret
 
         elif self.get_stage() == 5:
+            log.debug(f"Entering handshake stage 5 ...")
+
             # final client message 5 arrives; verify
             ok = self.session.handshake_5_c(input_data)
             if not ok:
@@ -174,7 +175,7 @@ class SakeServer(Peer):
             before = self.session.server_crypt.rx_seq
             after = 2
             self.session.server_crypt.rx_seq = after
-            logging.debug(f"Set server rx_seq from {before} to {after}")
+            log.debug(f"Setting server crypt's rx_seq from {before} to {after}")
             
             return None
 

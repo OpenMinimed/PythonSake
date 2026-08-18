@@ -97,39 +97,42 @@ class Session():
     def __check_permit(self, payload, verifier_static_keys, prover_static_keys, prover_device_type:int):
 
         if prover_static_keys is not None:
-            self.log.debug(f"check_permit() 1: {payload.hex() = }")
-            self.log.debug(f"check_permit() 1: {prover_static_keys.handshake_payload.hex() = }")
+            logger = self.log.getChild("check_permit() 1")
+
+            logger.debug(f"payload = {payload.hex()}")
+            logger.debug(f"prover_static_keys.handshake_payload = {prover_static_keys.handshake_payload.hex()}")
             if payload == prover_static_keys.handshake_payload:
-                self.log.debug("check_permit() 1: handshake payload match")
+                logger.debug("handshake payload match")
                 # TODO add this to return condition??
             else:
-                self.log.error(f"check_permit() 1: mismatched!")
+                logger.error(f"handshake payload mismatch")
         
         if verifier_static_keys is not None:
+            logger = self.log.getChild("check_permit() 2")
             
             plain = AES.new(verifier_static_keys.permit_decrypt_key, AES.MODE_ECB).decrypt(
                 payload
             )
             auth = CMAC.new(verifier_static_keys.permit_auth_key, ciphermod=AES, mac_len=4)
             auth.update(plain[:12])
-            self.log.debug(f"check_permit() 2: payload = {payload.hex()}")
-            self.log.debug(f"check_permit() 2: plain first = {plain[12:].hex() = }")
-            self.log.debug(f"check_permit() 2: plain last  = {plain[:12].hex() = }")
+            logger.debug(f"payload = {payload.hex()}")
+            logger.debug(f"plain first = {plain[12:].hex()}")
+            logger.debug(f"plain last  = {plain[:12].hex()}")
             auth.verify(plain[12:])
             
             if plain[0] == 0 and plain[1] == prover_device_type:
-                self.log.debug("check_permit() 2: prover device type match")
+                logger.debug("prover device type match")
                 return True
             else:
-                self.log.error(f"check_permit() 2: mismatched")
+                logger.error(f"prover device mismatch")
 
         
         return False
      
     @staticmethod
-    def cmac8(client_key_material, server_key_material, derivation_key, handshake_auth_key):
-        logging.debug(f"cmac8() = {client_key_material.hex() = } {server_key_material.hex() = } {derivation_key.hex() = } {handshake_auth_key.hex() = }")
-        msg = server_key_material + client_key_material + derivation_key
+    def cmac8(client_key, server_key, derivation_key, handshake_auth_key):
+        logging.debug(f"cmac8(): client_key = {client_key.hex()} server_key = {server_key.hex()} derivation_key = {derivation_key.hex()} handshake_auth_key = {handshake_auth_key.hex()}")
+        msg = server_key + client_key + derivation_key
         assert len(msg) == 32
         cobj = CMAC.new(handshake_auth_key, ciphermod=AES, mac_len=8)
         cobj.update(msg)
@@ -146,7 +149,8 @@ class Session():
     # region handshake
 
     def handshake_0_s(self, msg:bytes):
-        self.log.debug("handshake_0_s()")
+        logger = self.log.getChild("handshake_0_s()")
+        logger.debug(f"msg = {msg.hex()}")
         self.check_len(msg)
         
         if msg[1] != 1: # TODO: what is this?
@@ -156,8 +160,8 @@ class Session():
         return
 
     def handshake_1_c(self, msg: bytes):
-        self.log.debug("handshake_1_c()")
-
+        logger = self.log.getChild("handshake_1_c()")
+        logger.debug(f"msg = {msg.hex()}")
         self.check_len(msg)
 
         self.client_key_material = msg[:8]
@@ -184,12 +188,14 @@ class Session():
         # extract the two main keys
         self.derivation_key = static_keys.derivation_key
         self.handshake_auth_key = static_keys.handshake_auth_key
-        self.log.debug(f"handshake_1_c() done, deriv and handshake keys are selected")
+        logger.debug(f"done, deriv and handshake keys are selected")
         return
 
     def handshake_2_s(self, msg: bytes):
-        self.log.debug("handshake_2_s()")
+        logger = self.log.getChild("handshake_2_s()")
+        logger.debug(f"msg = {msg.hex()}")
         self.check_len(msg)
+
         server_key_material = msg[8:16]
         server_nonce = msg[16:20]
         auth = self.cmac8(
@@ -200,14 +206,14 @@ class Session():
         )
         received = msg[0:8]
         auth.verify(received)
-        self.log.debug(f"handshake_2_s() verified")
+        logger.debug("authentication tag verified")
         self.server_key_material = server_key_material
         self.server_nonce = server_nonce
         return
 
     def handshake_3_c(self, msg: bytes):
-        self.log.debug("handshake_3_c()")
-
+        logger = self.log.getChild("handshake_3_c()")
+        logger.debug(f"msg = {msg.hex()}")
         self.check_len(msg)
 
         auth1 = self.cmac8(
@@ -226,14 +232,15 @@ class Session():
 
         received_mac = msg[:8]
         expected_mac = auth2.digest()
-        # self.log.debug(f"expected auth2 cmac = {expected_mac.hex()} for {inner.hex()} data")
+        # logger.debug(f"expected auth2 cmac = {expected_mac.hex()} for {inner.hex()} data")
         
         # die here if we get mac error! the device might send us random garbage intentionally if we did something wrong!
         auth2.verify(received_mac) 
         
         #if received_mac != expected_mac:
-        #    self.log.error(f"MAC MISMATCH! IGNORING! {received_mac.hex() = } vs {expected_mac.hex() = }")
+        #    logger.error(f"MAC MISMATCH! IGNORING! {received_mac.hex() = } vs {expected_mac.hex() = }")
 
+        self.log.debug(f"creating seqcrypts")
         self._create_crypts()
 
         return
@@ -243,30 +250,32 @@ class Session():
             self.server_key_material + self.client_key_material
         )
         nonce = self.client_nonce + self.server_nonce
-        self.log.debug(f"merged nonces = {nonce.hex() = }")
+        self.log.debug(f"merged nonces = {nonce.hex()}")
         self.client_crypt = SeqCrypt(key=key, nonce=nonce, seq=0)
         self.server_crypt = SeqCrypt(key=key, nonce=nonce, seq=1)
-        self.log.debug(f"seqcrypts are created!")
         return
     
     def handshake_4_s(self, msg: bytes) -> bool:
-        self.log.debug("handshake_4_s()")
+        logger = self.log.getChild("handshake_4_s()")
+        logger.debug(f"msg = {msg.hex()}")
         self.check_len(msg)
 
         # moved to the end of 3_c():
+        # self.log.debug(f"Creating seqcrypts")
         # self._create_crypts()
 
         inner = self.server_crypt.decrypt(msg)[:16]
-        self.log.debug(f"handshake_4_s() {inner.hex() = }")
+        logger.debug(f"inner = {inner.hex()}")
         return self.__check_permit(inner, self.client_static_keys, self.server_static_keys, self.server_device_type.value)
         
     def handshake_5_c(self, msg: bytes) -> bool:
-        self.log.debug("handshake_5_c()")
+        logger = self.log.getChild("handshake_5_c()")
+        logger.debug(f"msg = {msg.hex()}")
         self.check_len(msg)
-        self.log.debug(f"handshake_5_c(): arg = {msg.hex()}")
+
         inner = self.client_crypt.decrypt(msg)[:-1]
-        self.log.debug(f"handshake_5_c(): {inner.hex() = }")
-        self.log.debug(f"{self.server_static_keys =}, {self.client_static_keys = }, {self.client_device_type = }")
+        logger.debug(f"inner = {inner.hex()}")
+        logger.debug(f"server_static_keys = {self.server_static_keys}, client_static_keys = {self.client_static_keys}, client_device_type = {self.client_device_type}")
         return self.__check_permit(inner, self.server_static_keys, self.client_static_keys, self.client_device_type.value)
 
 if __name__ == "__main__":
@@ -299,6 +308,10 @@ if __name__ == "__main__":
     print(sess)
     sess.handshake_5_c(test_msgs[5])
 
-    print("session test did not crash. this is definitely a good sign! run the client and server tests too!")
+    print()
+    print("Session test did not crash. This is definitely a good sign!")
+    print("Run the client and server tests too!")
+    print()
     print(sess)
     print(sess.get_state_checksum())
+
