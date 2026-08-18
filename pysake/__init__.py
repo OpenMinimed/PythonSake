@@ -1,6 +1,7 @@
 from pysake.keys import *
 from pysake.constants import *
 from pysake.client import SakeClient
+from pysake.v2 import SakeV2Client, SakeV2Server, Passkey
 from pysake.device_types import DeviceType
 
 
@@ -18,6 +19,11 @@ __all__ = [
 
     # client
     "SakeClient",
+
+    # v2 (passkey / SRP-6a)
+    "SakeV2Client",
+    "SakeV2Server",
+    "Passkey",
 
     # device types,
     "DeviceType",

@@ -12,6 +12,7 @@ To test the implementation run the following:
     python -m pysake.session
     python -m pysake.server
     python -m pysake.client
+    python -m pysake.v2
 
 Output will tell if you the tests failed or passed.
 

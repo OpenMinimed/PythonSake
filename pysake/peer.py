@@ -23,6 +23,10 @@ class Peer():
     def get_stage(self) -> int: 
         return self._stage
     
+    def is_done(self) -> bool:
+        # v1 handshakes complete at stage 6; v2 peers override this
+        return self.get_stage() == 6
+    
     def _brute_force_ghost_byte(self, crypt_obj, payload16, expected:int):
       
         # NOTE: i think the used padding at the last permit message is a random byte in the original implementations.
