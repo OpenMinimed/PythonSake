@@ -15,7 +15,7 @@ class Peer():
 
     def increment_stage(self):
         new = self._stage + 1
-        self.log.debug(f"advancing from handshake stage {self._stage} to {new}")
+        self.log.info(f"Advancing from SAKE handshake stage {self._stage} to {new}")
         self._stage = new
         self.log.debug(f"state = {str(self.session)}")
         return
