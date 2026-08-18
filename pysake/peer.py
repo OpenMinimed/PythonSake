@@ -33,14 +33,14 @@ class Peer():
         for i in range(0, 0xff):
             pad = bytearray([i])
             test = payload16 + pad
-            bak_seq = crypt_obj.seq
+            bak_seq = crypt_obj.tx_seq
           #  try:
             out = crypt_obj.encrypt(test)
           #  except Exception as e:
                 #print(e)
           #      crypt_obj.seq = bak_seq
           #      continue
-            crypt_obj.seq = bak_seq
+            crypt_obj.tx_seq = bak_seq
             if out[-4] == expected:
                 found.append(i)
                 self.log.debug(f"found a ghost byte: {hex(i)}")
