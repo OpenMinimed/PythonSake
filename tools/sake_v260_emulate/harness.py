@@ -22,13 +22,16 @@ for seg in elf.iter_segments():
         data = seg.data()
         uc.mem_write(MAP_BASE + seg['p_vaddr'], data)
 
-STACK_BASE = 0x60000
-STACK_SIZE = 0x20000
+# Well-separated regions -- the heap in particular needs real headroom since
+# our free() is a no-op, and a modexp loop's repeated temp-bignum
+# alloc/free cycles otherwise exhaust a small arena.
+STACK_BASE = 0x01000000
+STACK_SIZE = 0x00100000  # 1MB
 uc.mem_map(STACK_BASE, STACK_SIZE, UC_PROT_ALL)
 STACK_TOP = STACK_BASE + STACK_SIZE - 0x100
 
-HEAP_BASE = 0x90000
-HEAP_SIZE = 0x40000
+HEAP_BASE = 0x02000000
+HEAP_SIZE = 0x04000000  # 64MB
 uc.mem_map(HEAP_BASE, HEAP_SIZE, UC_PROT_ALL)
 heap_off = [0]
 
@@ -42,7 +45,7 @@ def heap_alloc(nbytes):
     return addr
 
 
-TRAMP_BASE = 0xd0000
+TRAMP_BASE = 0x07000000
 uc.mem_map(TRAMP_BASE, 0x10000, UC_PROT_ALL)
 BX_LR = struct.pack("<H", 0x4770)
 
@@ -181,6 +184,79 @@ def _reg_size(name):
     return 16 if name.startswith('q') else 8
 
 
+def _parse_vld1_vst1_operands(ops):
+    """
+    Parse capstone's op_str for vld1/vst1, e.g.:
+      "{d16, d17}, [r0]"        -- no writeback
+      "{d16, d17}, [r1]!"       -- writeback: base += total bytes transferred
+      "{d16, d17}, [r6], r0"    -- writeback: base += value of r0 (register form)
+    Returns (reg_names, base_reg_name, writeback), where writeback is None (no
+    writeback), "auto" (advance base by the total transferred size), or a
+    register name (advance base by that register's current value).
+    """
+    regs_part, rest = ops.split('[', 1)
+    reg_names = [r.strip().strip('{}') for r in regs_part.split(',') if r.strip().strip('{}')]
+    inside, after = rest.split(']', 1)
+    base_reg_name = inside.strip()
+    after = after.strip()
+    if after == '!':
+        writeback = "auto"
+    elif after.startswith(','):
+        writeback = after.lstrip(',').strip()
+    else:
+        writeback = None
+    return reg_names, base_reg_name, writeback
+
+
+def _apply_writeback(base_reg_name, writeback, total_bytes):
+    if writeback is None:
+        return
+    base_const = getattr(arm_const, f"UC_ARM_REG_{base_reg_name.upper()}")
+    base_val = uc.reg_read(base_const)
+    if writeback == "auto":
+        delta = total_bytes
+    else:
+        delta = uc.reg_read(getattr(arm_const, f"UC_ARM_REG_{writeback.upper()}"))
+    uc.reg_write(base_const, (base_val + delta) & 0xffffffff)
+
+
+def _neon_set(rn, data):
+    """Write a d/q register and keep its alias in sync (see the big comment
+    in the vmov handler below for why this matters)."""
+    _neon_regfile[rn] = data
+    if rn.startswith('d'):
+        dn = int(rn[1:])
+        qn = dn // 2
+        other = f'd{dn+1}' if dn % 2 == 0 else f'd{dn-1}'
+        other_data = _neon_regfile.get(other, b'\x00' * 8)
+        combined = data + other_data if dn % 2 == 0 else other_data + data
+        _neon_regfile[f'q{qn}'] = combined
+    elif rn.startswith('q'):
+        qn = int(rn[1:])
+        _neon_regfile[f'd{qn*2}'] = data[0:8]
+        _neon_regfile[f'd{qn*2+1}'] = data[8:16]
+
+
+def _neon_get(rn, sz):
+    """Read a d/q register, falling back to deriving it from its alias if
+    only that was ever written (see _neon_set)."""
+    if rn in _neon_regfile:
+        return _neon_regfile[rn]
+    if rn.startswith('d'):
+        dn = int(rn[1:])
+        qn = dn // 2
+        q_data = _neon_regfile.get(f'q{qn}')
+        if q_data is not None:
+            return q_data[0:8] if dn % 2 == 0 else q_data[8:16]
+    elif rn.startswith('q'):
+        qn = int(rn[1:])
+        d_lo = _neon_regfile.get(f'd{qn*2}')
+        d_hi = _neon_regfile.get(f'd{qn*2+1}')
+        if d_lo is not None or d_hi is not None:
+            return (d_lo or b'\x00' * 8) + (d_hi or b'\x00' * 8)
+    return b"\x00" * sz
+
+
 def emulate_one_neon(pc_thumb):
     pc = pc_thumb & ~1
     code = bytes(uc.mem_read(pc, 4))
@@ -190,33 +266,59 @@ def emulate_one_neon(pc_thumb):
     insn = insns[0]
     mnem, ops = insn.mnemonic, insn.op_str
     if mnem.startswith("vld1"):
-        regs_part, mem_part = ops.split('[')
-        reg_names = [r.strip().strip('{}') for r in regs_part.split(',') if r.strip().strip('{}')]
-        base_reg_name = mem_part.split(']')[0].strip()
+        reg_names, base_reg_name, writeback = _parse_vld1_vst1_operands(ops)
         base_reg = uc.reg_read(getattr(arm_const, f"UC_ARM_REG_{base_reg_name.upper()}"))
         off = 0
         for rn in reg_names:
             sz = _reg_size(rn)
-            _neon_regfile[rn] = bytes(uc.mem_read(base_reg + off, sz))
+            _neon_set(rn, bytes(uc.mem_read(base_reg + off, sz)))
             off += sz
+        _apply_writeback(base_reg_name, writeback, off)
         return insn.size
     elif mnem.startswith("vst1"):
-        regs_part, mem_part = ops.split('[')
-        reg_names = [r.strip().strip('{}') for r in regs_part.split(',') if r.strip().strip('{}')]
-        base_reg_name = mem_part.split(']')[0].strip()
+        reg_names, base_reg_name, writeback = _parse_vld1_vst1_operands(ops)
         base_reg = uc.reg_read(getattr(arm_const, f"UC_ARM_REG_{base_reg_name.upper()}"))
         off = 0
         for rn in reg_names:
             sz = _reg_size(rn)
-            data = _neon_regfile.get(rn, b"\x00" * sz)
+            data = _neon_get(rn, sz)
             uc.mem_write(base_reg + off, data)
             off += sz
+        _apply_writeback(base_reg_name, writeback, off)
         return insn.size
     elif mnem.startswith('vmov') and '#' in ops:
         reg_name, imm = [x.strip() for x in ops.split(',', 1)]
         val = int(imm.lstrip('#'), 0)
         sz = _reg_size(reg_name)
-        _neon_regfile[reg_name] = val.to_bytes(sz, 'little')
+        # _neon_set keeps qN in sync with its dN*2/dN*2+1 halves (they're the
+        # same physical storage on real hardware). This mattered here: a
+        # bare dict write would leave BN_InitMultiZero's "vmov q8,#0" unseen
+        # by the "vst1 {d16,d17}" that follows, so it would silently write
+        # whatever SHA256_Init's earlier, unrelated "vld1 {d16,d17}" had left
+        # behind instead of the zero q8 had just set.
+        _neon_set(reg_name, val.to_bytes(sz, 'little'))
+        return insn.size
+    elif mnem == 'vpush':
+        reg_names = [r.strip() for r in ops.strip('{}').split(',')]
+        sp = uc.reg_read(UC_ARM_REG_SP)
+        total = sum(_reg_size(rn) for rn in reg_names)
+        sp -= total
+        uc.reg_write(UC_ARM_REG_SP, sp)
+        off = 0
+        for rn in reg_names:
+            sz = _reg_size(rn)
+            uc.mem_write(sp + off, _neon_get(rn, sz))
+            off += sz
+        return insn.size
+    elif mnem == 'vpop':
+        reg_names = [r.strip() for r in ops.strip('{}').split(',')]
+        sp = uc.reg_read(UC_ARM_REG_SP)
+        off = 0
+        for rn in reg_names:
+            sz = _reg_size(rn)
+            _neon_set(rn, bytes(uc.mem_read(sp + off, sz)))
+            off += sz
+        uc.reg_write(UC_ARM_REG_SP, sp + off)
         return insn.size
     else:
         raise RuntimeError(f"unhandled insn for NEON fallback @ {hex(pc)}: {mnem} {ops}")

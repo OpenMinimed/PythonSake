@@ -13,93 +13,93 @@ from pysake.seqcrypt import SeqCrypt
 # protocol-version 2 (passkey / SRP-6a) selects this path, see SakeLibraryRE
 # README section 24/25.
 #
-# STATUS (validated against libandroid-sake-lib_v260.so via live ARM
-# emulation and disassembly in this session -- see
-# tools/sake_v260_emulate/ and the commit that added this comment):
+# STATUS (validated against libandroid-sake-lib_v260.so via a working live
+# ARM emulation harness -- see tools/sake_v260_emulate/, whose
+# SRPClient_Init/SRPClient_Step run the real code end-to-end successfully):
 #
-#   VERIFIED from real disassembly (SRPClient_Step @ 0x19184,
-#   SRPServer_Step @ 0x197f0, SRPServer_Init @ 0x19568):
-#     - message framing IS payload + u32 LE length at a fixed +0x50
-#       offset (matches this file's frame-byte approach, minus the type
-#       byte -- see below)
-#     - the "kick" that starts SRPClient_Step is 16 bytes, not 20
-#       (0x10 checked at SRPClient_Step state 1) -- the 20-zero-byte
-#       trigger this file uses is a *GATT-level* convention carried
-#       over from the v1 protocol and is never fed into the real SRP
-#       code, so it does not need to match
-#     - public values A and B are each exactly 64 bytes on the wire
-#       (hardcoded 0x40, not derived from the actual export length),
-#       i.e. the real group is a *custom ~512-bit* modulus -- NOT the
-#       128-byte/1024-bit RFC5054-style group this file assumed
-#       (srp.NG_1024). No 1024-bit standard group ever produces a
-#       64-byte public value, so the old FRAME_PUB_A/B "(128 bytes)"
-#       comments and _VALUE_WIDTH=128 below were simply wrong.
-#     - the proof messages M1/M2 are 32 bytes, and there's a 1-byte
-#       status message after -- matches this file's FRAME_PROOF/
-#       FRAME_STATUS already.
+#   CONFIRMED, by directly running the real code and reading back the
+#   populated bignums (not guessed, not inferred from disassembly alone):
 #
-#   NOT YET RECOVERED -- and the reason a generic SRP library (this
-#   file's approach) cannot actually interoperate with a real pump,
-#   even after fixing the group size:
-#     - the real modulus N and generator g bytes. SRPClient_Init only
-#       ever calls BignumCtx_SetDataField() with an *empty* string, so
-#       N/g are not a simple embedded ASCII/byte constant at a fixed
-#       offset findable by string search; they get populated lazily
-#       through a chain of bignum-init calls that this session's ARM
-#       emulation harness (tools/sake_v260_emulate/) does not yet get
-#       through cleanly (a realloc() call deep inside a nested
-#       SRP_BignumCtx_Init -> SRP_HashToBignum -> BN_Grow chain reads
-#       what looks like an uninitialized/garbage pointer -- harness
-#       bug, not a property of the real library, which of course works
-#       fine on-device).
+#     - N and g ARE the standard RFC5054 1024-bit SRP group -- i.e.
+#       srp.NG_1024 below was, by luck, already the right choice. Verified
+#       two ways: (1) a 128-byte embedded constant the real code loads
+#       matches the RFC5054 N byte-for-byte; (2) after running
+#       SRPClient_Init+SRPClient_Step in the emulator, reading the actual
+#       populated SAKE_MP_INT bignum at the modulus's struct offset and
+#       reconstructing it from its 28-bit limbs reproduces that exact
+#       1024-bit value, and the neighboring "g" slot holds exactly 2.
+#     - the wire DOES truncate: SRPClient_Step copies only the first 64
+#       bytes of the (up to 128-byte) exported public value onto the wire,
+#       via a hardcoded 0x40 -- confirmed by running it: the real,
+#       successfully-computed A came back as exactly 64 bytes. So A/B are
+#       64 bytes on the wire despite N being 1024-bit/128 bytes; this file
+#       does NOT reproduce that truncation (python-srp always emits the
+#       full N-width value), which is one of the two remaining gaps below.
+#     - message framing is payload + u32 LE length at a fixed +0x50 offset
+#       (matches this file's frame-byte approach, minus the type byte).
+#     - the "kick" that starts SRPClient_Step is 16 bytes, not 20 (0x10
+#       checked at SRPClient_Step state 1) -- the 20-zero-byte trigger
+#       this file uses is a *GATT-level* convention carried over from the
+#       v1 protocol and is never fed into the real SRP code, so it does
+#       not need to match.
+#     - proof messages M1/M2 are 32 bytes, with a 1-byte status message
+#       after -- matches this file's FRAME_PROOF/FRAME_STATUS already.
+#
+#   Getting this far took finding and fixing two real bugs in the
+#   emulation harness itself (not properties of the pump): ARM's
+#   "vld1/vst1 ...!" and "...],Rn" writeback addressing wasn't advancing
+#   the base register, and the software NEON register file didn't alias
+#   Qn with its Dn*2/Dn*2+1 halves, so a "zero out q8" write was
+#   invisible to a later "store d16,d17" read, which then silently wrote
+#   back stale data (in one very confusing case, a prior SHA-256 IV
+#   constant) instead of zero. See tools/sake_v260_emulate/harness.py.
+#
+#   STILL NOT CONFIRMED -- the reason this file is a self-consistent demo,
+#   not a validated implementation of the real pump protocol:
 #     - the exact `x` (SRP private exponent) derivation. On real
 #       SRPClient_Step state 1, `x` comes from
 #       SRP_HashToBignum(ctx, <128-byte embedded constant>, 0x80,
 #                         <1-byte embedded constant>, 1,
 #                         <16-byte kick input>, 0x10)
 #       i.e. it is NOT simply H(salt || passkey) the way vanilla SRP-6a
-#       (and this file, via python-srp) computes it. The two embedded
-#       constants above are not yet extracted either. The *passkey*
-#       itself only enters afterwards, via a separate
-#       SRP_GenVerifierClient() call. Because of this, plugging the
-#       real N/g into python-srp (e.g. via srp.NG_CUSTOM) would still
-#       not produce byte-compatible messages with a real pump -- the
-#       whole x/verifier construction needs a bespoke reimplementation,
-#       or the SAKE v2 handshake needs to be run through the real
-#       native library directly (see tools/sake_v260_emulate/).
+#       (and this file, via python-srp) computes it. The passkey itself
+#       only enters afterwards, via a separate SRP_GenVerifierClient()
+#       call. This file's python-srp-based x/verifier computation will
+#       therefore never match a real pump's, regardless of N/g being
+#       right, until this exact construction is reproduced (or driven
+#       through the real library directly, per tools/sake_v260_emulate/).
+#     - the wire truncation to 64 bytes (see above) isn't reproduced here.
+#     - the session-key -> AES-CTR/CMAC KDF below is still fully theorized.
 #
-# Given the above, this module is kept as a self-consistent (client
-# talks only to server, both in this same process) protocol-shaped
-# demo/testbed, NOT a validated implementation of the real pump
-# protocol. Do not expect it to pair with an actual device.
+# Given the above, this module is kept as a self-consistent (client talks
+# only to server, both in this same process) protocol-shaped demo/testbed.
+# Do not expect it to pair with an actual device.
 
 # default passkey used when none is supplied (hardcoded for testing)
 TEST_PASSKEY = 123456
 
 # SRP group / hash
 #
-# PLACEHOLDER ONLY: this is a standard 1024-bit RFC5054-style group,
-# picked purely so the self-consistent demo below has *some* working
-# group. It is confirmed (see status block above) to NOT be the real
-# pump's group, which uses 64-byte (~512-bit) public values.
+# CONFIRMED correct -- see status block above. This is the real pump's
+# group, verified by running the real native library and reading back its
+# populated N/g bignums, not merely assumed because it's the RFC5054
+# default.
 _NG = srp.NG_1024
 _HASH = srp.SHA256
 
 # frame type bytes
-FRAME_PUB_A    = 0x01  # client public value A -- verified 64 bytes on the real pump, but see _VALUE_WIDTH note
-FRAME_PUB_B    = 0x02  # salt (16, verified) || server pub B (64 bytes on the real pump)
-FRAME_PROOF    = 0x03  # SRP proof M1 / M2 (32 bytes, verified)
-FRAME_STATUS   = 0x05  # status byte (0x04 = success, verified: SRP state 4 "emit success, byteCount=1, out[0]=4")
+FRAME_PUB_A    = 0x01  # client public value A -- real pump truncates this to 64 bytes on the wire (not reproduced here, see status block)
+FRAME_PUB_B    = 0x02  # salt (16, confirmed) || server pub B (64 bytes on the real pump, not reproduced here)
+FRAME_PROOF    = 0x03  # SRP proof M1 / M2 (32 bytes, confirmed)
+FRAME_STATUS   = 0x05  # status byte (0x04 = success, confirmed: SRP state 4 "emit success, byteCount=1, out[0]=4")
 
 _STATUS_OK = 0x04  # per v260 SRP state 4: "emit success (byteCount=1, out[0]=4)"
 
-# Fixed width in bytes of the serialized SRP values for the PLACEHOLDER
-# group above (_NG = NG_1024, whose public values ARE 128 bytes). This is
-# deliberately kept consistent with _NG for the self-test to work; it does
-# NOT reflect the real pump's verified 64-byte public value width, since
-# that requires the real (unknown) group, not a same-sized substitute --
-# python-srp ties the public-value width to N's bit length, so there is no
-# way to get 64-byte values out of it without the real N.
+# Fixed width in bytes of the serialized SRP values for _NG (NG_1024, whose
+# public values are the full 128 bytes of N). The real pump truncates its
+# wire messages to 64 bytes instead (confirmed, see status block above);
+# this file does not reproduce that truncation, so its self-test messages
+# are full-width and would NOT match a real pump's byte-for-byte.
 _VALUE_WIDTH = 128
 
 

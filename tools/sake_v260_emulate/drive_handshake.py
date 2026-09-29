@@ -1,5 +1,4 @@
-import struct
-import sys
+import struct, sys
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 import harness as h
 
@@ -25,6 +24,11 @@ def mk_passkey(n):
     uc.mem_write(buf+16, struct.pack("<I", 4))
     return buf
 
+def dump_state(name, ctx):
+    d = bytes(uc.mem_read(ctx+0x300, 20))
+    bFlags, dwState, dwSubstate, dwErrorCode, dwResult = d[0], *struct.unpack("<iiii", d[4:20])
+    print(f"  {name}: bFlags={bFlags} dwState={dwState} dwSubstate={dwSubstate} dwErrorCode={dwErrorCode} dwResult={dwResult}")
+
 SRP_SIZE = 0x400
 PASSKEY = 123456
 
@@ -33,55 +37,48 @@ server_ctx = heap_alloc(SRP_SIZE)
 pk_c = mk_passkey(PASSKEY)
 pk_s = mk_passkey(PASSKEY)
 
-r = call(0x190c8, [client_ctx, pk_c])
-print("SRPClient_Init:", r)
-r = call(0x19568, [server_ctx, pk_s])
-print("SRPServer_Init:", r)
+
+r = call(0x190c8, [client_ctx, pk_c]); print("SRPClient_Init:", r)
+r = call(0x19568, [server_ctx, pk_s]); print("SRPServer_Init:", r)
+dump_state("client", client_ctx); dump_state("server", server_ctx)
 
 out = mkmsg()
-r = call(0x197f0, [server_ctx, 0, out])   # SRPServer_Step(server, NULL, out)
+r = call(0x197f0, [server_ctx, 0, out])
 print("SRPServer_Step#1 ret=", r, "out=", msg_bytes(out).hex())
+dump_state("server", server_ctx)
 srv_hello = msg_bytes(out)
 
-inp = mkmsg(srv_hello)
-out = mkmsg()
-r = call(0x19184, [client_ctx, inp, out])  # SRPClient_Step
+inp = mkmsg(srv_hello); out = mkmsg()
+r = call(0x19184, [client_ctx, inp, out])
 print("SRPClient_Step#1 ret=", r, "out=", msg_bytes(out).hex())
+dump_state("client", client_ctx)
 client_A = msg_bytes(out)
 
-inp = mkmsg(client_A)
-out = mkmsg()
+inp = mkmsg(client_A); out = mkmsg()
 r = call(0x197f0, [server_ctx, inp, out])
 print("SRPServer_Step#2 ret=", r, "out=", msg_bytes(out).hex())
+dump_state("server", server_ctx)
 server_B = msg_bytes(out)
 
-inp = mkmsg(server_B)
-out = mkmsg()
+inp = mkmsg(server_B); out = mkmsg()
 r = call(0x19184, [client_ctx, inp, out])
 print("SRPClient_Step#2 ret=", r, "out=", msg_bytes(out).hex())
+dump_state("client", client_ctx)
 client_M1 = msg_bytes(out)
 
-inp = mkmsg(client_M1)
-out = mkmsg()
+inp = mkmsg(client_M1); out = mkmsg()
 r = call(0x197f0, [server_ctx, inp, out])
 print("SRPServer_Step#3 ret=", r, "out=", msg_bytes(out).hex())
+dump_state("server", server_ctx)
 server_msg3 = msg_bytes(out)
 
-inp = mkmsg(server_msg3)
-out = mkmsg()
+inp = mkmsg(server_msg3); out = mkmsg()
 r = call(0x19184, [client_ctx, inp, out])
 print("SRPClient_Step#3 ret=", r, "out=", msg_bytes(out).hex())
+dump_state("client", client_ctx)
 client_msg3 = msg_bytes(out)
 
-inp = mkmsg(client_msg3)
-out = mkmsg()
+inp = mkmsg(client_msg3); out = mkmsg()
 r = call(0x197f0, [server_ctx, inp, out])
 print("SRPServer_Step#4 ret=", r, "out=", msg_bytes(out).hex())
-
-# dump error/state fields for both contexts to diagnose
-def dump_ctx(name, ctx):
-    d = bytes(uc.mem_read(ctx, 0x20))
-    print(name, "flags/state/substate/errcode/result:", d.hex())
-
-dump_ctx("client", client_ctx)
-dump_ctx("server", server_ctx)
+dump_state("server", server_ctx)
