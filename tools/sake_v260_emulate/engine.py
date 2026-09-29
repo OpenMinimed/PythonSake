@@ -171,7 +171,15 @@ def build_permit_key_material(decrypt_key16: bytes, mac_key16: bytes, outgoing_p
     outgoing_permit_ciphertext16: AES_ECB_Encrypt(this side's own permit
       plaintext, using the PEER's decrypt key) -- what gets embedded as
       this side's own outgoing permit payload when it sends its handshake
-      finalize message.
+      finalize message. For a SELF-TEST faking both sides from scratch
+      (e.g. selftest_full_handshake.py), you have to compute this
+      yourself via aes_ecb_encrypt(). For REAL pump data, you don't: v1's
+      own real permit check (pysake/session.py's Session.__check_permit)
+      confirms the sender never encrypts at send time -- it just forwards
+      its own precomputed StaticKeys.handshake_payload verbatim (the
+      receiver alone decrypts, with its own key). pysake.constants.
+      KEYDB_PUMP_EXTRACTED's handshake_payload field is already exactly
+      this value; pass it here as-is.
 
     Byte layout (offsets confirmed via Ghidra's SAKE_KEY_DATABASE struct +
     live instrumentation):

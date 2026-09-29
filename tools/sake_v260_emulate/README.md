@@ -201,15 +201,25 @@ The SRP-6a core, the KDF, the AES-ECB/CMAC primitives, and the entire
 handshake state machine above are the **real library**, byte-exact. What's
 *not* real in `selftest_full_handshake.py`: the four 16-byte identity
 secrets (`K_CLIENT_DECRYPT`/`K_SERVER_DECRYPT`/`MAC_CLIENT`/`MAC_SERVER`)
-are placeholder values invented for the self-test, not a real pump's
-provisioned key material. A real pump's `SAKE_KEY_DATABASE_S` entries carry
-real, pump-specific secrets — most likely provisioned via the IDD Secure
-Control Point (`0x0109`) / `PublicKeyExchangeApiImpl` flow this project's
-`Documentation` repo describes, which is the actual candidate for *how* a
-real phone obtains this material during pairing. That flow is not yet
-connected to this engine — see `PythonPumpConnector`'s `idd/secure_control.py`
-and its docstring for the reverse-engineered wire format of that
-characteristic.
+are placeholder values invented for that self-test, which fakes *both*
+sides of the exchange from scratch and so needs a self-consistent invented
+pair for the fake side.
+
+For a **real pump**, this is not actually a second secret to go find. v1's
+own real permit check (`pysake/session.py`'s `Session.__check_permit`,
+exercised via `handshake_4_s`/`handshake_5_c`) shows the sender never
+encrypts its permit at send time — it just forwards its own precomputed
+`StaticKeys.handshake_payload` verbatim, wrapped only by the session
+stream cipher; only the *receiver* does the AES-ECB-decrypt, with its own
+key. That's real, working code, proven against a real pump for years.
+`pysake.constants.KEYDB_PUMP_EXTRACTED` already carries all three fields
+v2's permit step needs — `permit_decrypt_key`, `permit_auth_key`,
+`handshake_payload` — unused by v1, real, extracted from the same account.
+`handshake_payload` is Medtronic's server having already done the
+"encrypt our permit under the pump's key" step for us; we forward the
+finished ciphertext as-is, the same way v1 already does, no separate
+pump-side secret required. See `PythonPumpConnector`'s
+`ble/sake_v2_engine.py` for the wiring.
 
 ### Post-handshake secure messaging
 
