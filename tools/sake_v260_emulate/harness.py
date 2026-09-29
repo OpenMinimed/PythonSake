@@ -89,7 +89,7 @@ def hook_code(uc, address, size, user_data):
         dst, src, n = r0, r1, r2
         uc.mem_write(dst, bytes(uc.mem_read(src, n)))
         ret = dst
-    elif name == "memmove":
+    elif name in ("memmove", "__aeabi_memmove", "__aeabi_memmove4", "__aeabi_memmove8"):
         dst, src, n = r0, r1, r2
         uc.mem_write(dst, bytes(uc.mem_read(src, n)))
         ret = dst
@@ -138,21 +138,36 @@ uc.hook_add(UC_HOOK_CODE, hook_code)
 dynsym = elf.get_section_by_name('.dynsym')
 symbols = list(dynsym.iter_symbols())
 patched = 0
+relative_patched = 0
 for relsec_name in ('.rel.plt', '.rel.dyn'):
     relsec = elf.get_section_by_name(relsec_name)
     if relsec is None:
         continue
     for rel in relsec.iter_relocations():
+        r_type = rel['r_info_type']
+        if r_type == 23:  # R_ARM_RELATIVE: internal pointer, no symbol.
+            # REL-format ELF stores the addend in-place at r_offset; the
+            # fixup is target += load_bias. Our "load bias" is just
+            # MAP_BASE, since the file's own vaddrs are already 0-based
+            # (confirmed: PT_LOAD vaddr=0x0) and we map at MAP_BASE. This
+            # was the actual bug behind a real crash: an internal function
+            # pointer (SRP_BignumCtx_Free's deallocator callback) was left
+            # unrebased, so calling through it jumped to (real_target -
+            # MAP_BASE) instead of real_target.
+            addr = MAP_BASE + rel['r_offset']
+            (orig,) = struct.unpack("<I", bytes(uc.mem_read(addr, 4)))
+            uc.mem_write(addr, struct.pack("<I", (orig + MAP_BASE) & 0xffffffff))
+            relative_patched += 1
+            continue
         sym = symbols[rel['r_info_sym']]
         name = sym.name
         if not name:
             continue
-        r_type = rel['r_info_type']
         if r_type in (22, 21, 2):  # JUMP_SLOT, GLOB_DAT, ABS32
             tramp = make_trampoline(name)
             uc.mem_write(MAP_BASE + rel['r_offset'], struct.pack("<I", tramp))
             patched += 1
-print(f"patched {patched} GOT/PLT relocations")
+print(f"patched {patched} GOT/PLT relocations, {relative_patched} R_ARM_RELATIVE fixups")
 
 # hook an internal (non-imported) function directly at its real address, by
 # overwriting its entry instruction with a trampoline-style "bx lr" trap.
