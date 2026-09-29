@@ -50,6 +50,16 @@ _KEYDB_ENTRY_SIZE = 0x51  # 1 type byte + 80 bytes of material
 _ADDR_AES_ECB_ENCRYPT = 0x17e0c
 _ADDR_VERIFY_MESSAGE_HF = 0x17cb0
 
+# post-handshake secure-message encrypt/decrypt over the established secure
+# link (client+0x40 / server+0x40 is the persisted SakeCrypto cipher state,
+# i.e. exactly pSecureLink -- confirmed by disassembling the JNI wrappers'
+# targets, which is also where MAX_SAKE_USER_MESSAGE_BYTE_COUNT's 0x4d-byte
+# cap on the plaintext size comes from, per FUN_000169e0's own check)
+_ADDR_CLIENT_SECURE_FOR_SENDING = 0x16668
+_ADDR_CLIENT_UNSECURE_AFTER_RECEIVING = 0x1667a
+_ADDR_SERVER_SECURE_FOR_SENDING = 0x176a4
+_ADDR_SERVER_UNSECURE_AFTER_RECEIVING = 0x176b6
+
 RET_ERROR = 0  # from earlier drives: not actually observed as a *first* return; kept for completeness
 RET_DONE = 0
 RET_FAILED = 1
@@ -64,6 +74,10 @@ class SakeHandshakeFailed(RuntimeError):
         super().__init__(f"{side} SAKE v2 handshake failed, lastError={last_error}")
         self.side = side
         self.last_error = last_error
+
+
+class SakeSecureMessageFailed(RuntimeError):
+    pass
 
 
 def _mk_msg(payload: bytes = b""):
@@ -170,6 +184,15 @@ def build_permit_key_material(decrypt_key16: bytes, mac_key16: bytes, outgoing_p
     return bytes(32) + decrypt_key16 + mac_key16 + outgoing_permit_ciphertext16
 
 
+def _secure_op(addr, struct_ptr, data: bytes) -> bytes:
+    inp = _mk_msg(data)
+    out = _mk_msg()
+    r = call(addr, [struct_ptr, inp, out])
+    if r == 0:
+        raise SakeSecureMessageFailed("secure-message operation failed")
+    return _msg_bytes(out)
+
+
 def build_key_database(own_type: int, peer_type: int, material_80b: bytes):
     """
     Allocate and populate a SAKE_KEY_DATABASE_S with a single remote-device
@@ -222,6 +245,14 @@ class SakeV2Client:
     def secure_link(self) -> bytes:
         return bytes(uc.mem_read(self._struct + _CLIENT_OFF_SECURE_LINK, 48))
 
+    def secure_for_sending(self, plaintext: bytes) -> bytes:
+        """Encrypt+sign a post-handshake message to send to the server."""
+        return _secure_op(_ADDR_CLIENT_SECURE_FOR_SENDING, self._struct, plaintext)
+
+    def unsecure_after_receiving(self, ciphertext: bytes) -> bytes:
+        """Decrypt+verify a post-handshake message received from the server."""
+        return _secure_op(_ADDR_CLIENT_UNSECURE_AFTER_RECEIVING, self._struct, ciphertext)
+
 
 class SakeV2Server:
     def __init__(self, passkey: int, key_database_addr: int):
@@ -250,3 +281,11 @@ class SakeV2Server:
     @property
     def secure_link(self) -> bytes:
         return bytes(uc.mem_read(self._struct + _SERVER_OFF_SECURE_LINK, 48))
+
+    def secure_for_sending(self, plaintext: bytes) -> bytes:
+        """Encrypt+sign a post-handshake message to send to the client."""
+        return _secure_op(_ADDR_SERVER_SECURE_FOR_SENDING, self._struct, plaintext)
+
+    def unsecure_after_receiving(self, ciphertext: bytes) -> bytes:
+        """Decrypt+verify a post-handshake message received from the client."""
+        return _secure_op(_ADDR_SERVER_UNSECURE_AFTER_RECEIVING, self._struct, ciphertext)

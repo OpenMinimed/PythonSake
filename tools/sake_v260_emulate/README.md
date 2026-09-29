@@ -211,11 +211,34 @@ connected to this engine — see `PythonPumpConnector`'s `idd/secure_control.py`
 and its docstring for the reverse-engineered wire format of that
 characteristic.
 
+### Post-handshake secure messaging
+
+Once `is_done`, actual GATT traffic needs encrypting/decrypting under the
+established secure link too. The JNI-exported
+`Sake_Client_SecureForSending`/`Sake_Client_UnsecureAfterReceiving` (and the
+server equivalents) trace down through `SakeCrypto_EncryptSignAndIncrementSequence`
+to an internal message-framing routine (`FUN_000169e0`) that — confirmed via
+disassembly, not decompile, since the decompile again dropped an argument —
+reads/writes its input/output through the **exact same** `data[0:0x50] +
+count@0x50` inline layout the handshake messages use, not the
+`SAKE_SECURE_MESSAGE_S` `{pBytes, dwByteCount}` pointer-pair struct Ghidra's
+type database shows (that struct exists, but isn't what these particular
+functions operate on directly — presumably it's unwrapped one layer higher,
+at the SWIG/JNI boundary, before reaching native code). The 0x4d
+(77-byte) cap `FUN_000169e0` enforces on the plaintext is
+`MAX_SAKE_USER_MESSAGE_BYTE_COUNT` minus its 3-byte framing overhead.
+
+`engine.py`'s `.secure_for_sending(plaintext) -> ciphertext` /
+`.unsecure_after_receiving(ciphertext) -> plaintext` wrap this, and
+`selftest_full_handshake.py` proves a full round trip in both directions
+after the handshake completes.
+
 ### Using this from other code
 
 `engine.py` exposes `SakeV2Client`/`SakeV2Server` classes
 (`.step(incoming_bytes_or_None) -> reply_bytes_or_None`, `.is_done`,
-`.secure_link`, `.last_error`) plus the permit/key-database builder
+`.secure_link`, `.last_error`, `.secure_for_sending()`,
+`.unsecure_after_receiving()`) plus the permit/key-database builder
 functions, all driving the real library underneath. This is what
 `PythonPumpConnector`'s `--sake-v2` path should be wired to next, once real
 per-pump identity secrets are available.

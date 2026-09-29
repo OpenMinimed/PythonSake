@@ -70,3 +70,14 @@ assert client.is_done and server.is_done, "handshake did not complete on both si
 assert client.secure_link[8:] == server.secure_link[8:], "secure-link key material mismatch"
 print()
 print("OK: full protocol-v2 handshake completed, matching secure-link state on both sides.")
+
+# post-handshake secure messaging, both directions
+ct = client.secure_for_sending(b"hello pump!!")
+pt = server.unsecure_after_receiving(ct)
+assert pt == b"hello pump!!", f"client->server secure message mismatch: {pt!r}"
+print("OK: client->server secure message round trip matches.")
+
+ct2 = server.secure_for_sending(b"pump says hi")
+pt2 = client.unsecure_after_receiving(ct2)
+assert pt2 == b"pump says hi", f"server->client secure message mismatch: {pt2!r}"
+print("OK: server->client secure message round trip matches.")
