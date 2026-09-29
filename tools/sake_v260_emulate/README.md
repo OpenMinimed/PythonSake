@@ -98,20 +98,124 @@ found and fixed to get this far:
 All three are fixed (`_neon_set`/`_neon_get` and the relocation loop in
 `harness.py`).
 
-## Next step: the top-level handshake + secure link
+## The top-level handshake + secure link: now fully working
 
 `Sake_Client_Handshake`/`Sake_Server_Handshake` (the real public API,
 `0x165a4`/`0x175e8`) wrap the SRP core above with an additional
-challenge/IV/permit exchange layer and, on success, populate
+challenge/IV/**permit** exchange layer and, on success, populate
 `SAKE_CLIENT_S.pSecureLink`/`SAKE_SERVER_S.pSecureLink` (48 bytes each,
 confirmed via Ghidra's struct database — `SAKE_CLIENT_S` is 124 bytes,
 `SAKE_CLIENT_MEMORY_S` 952, `SAKE_SERVER_S` 172, `SAKE_SERVER_MEMORY_S`
-948, all field-accurate) with the real AES-CTR+CMAC secure-link state. A
-first drive through this API (client+server alternating, mirroring
-`drive_handshake.py`'s pattern) got through 7 of what should be ~11-12
-rounds before diverging — most likely because this layer's message
-boundaries don't map 1:1 onto raw `SRPClient_Step`/`SRPServer_Step` calls
-the way the lower-level drive assumed, not a new library bug (the same class
-of bug that's been found each time so far). Finishing this — matching the
-exact call/message sequence `Sake_Client_Handshake` expects — is what's left
-to extract and verify the real, final secure-link keys.
+948, all field-accurate) with the real AES-CTR+CMAC secure-link state.
+
+**`engine.py` now drives this end to end, and `selftest_full_handshake.py`
+proves it: both sides finish with `bIsSecureLinkEstablished=1` and
+byte-identical secure-link key material.** Getting there required correctly
+reverse-engineering the *permit exchange* — the layer this session's
+previous attempt stalled on 7 of ~9 rounds in, at `err=18`
+(`PERMIT_RECEIVED_INVALID`).
+
+### Solving the permit exchange
+
+The permit is how each side proves, at the very end of the handshake, that
+it independently knows a pre-shared identity secret for the peer's device
+type (on top of what SRP-6a alone proves) — pre-shared secrets live in the
+`SAKE_KEY_DATABASE_S` each side is initialized with
+(`SakeKeyDB_GetEntryByType`, confirmed to return `matched_entry + 1`, i.e.
+entry layout is `[0]=type byte, [1:81]=80 bytes of material`, straight from
+decompiling `FUN_00016dba`, the native backer of
+`Sake_KeyDatabase_AddRemoteDeviceKey` — a raw verbatim copy, no KDF).
+
+Getting the permit right took two rounds of being fooled by decompiler
+pseudocode and one round of instrumenting the *real running code* to settle
+it for good:
+
+1. **Wrong key-material layout (`err=18` immediately).** First pass used one
+   identical 80-byte blob on both sides. `ClientHandshake_State7FinalizeEncrypt`
+   reads its own **decrypt** key from offset `[32:48]` of its own entry but
+   sends its own permit **encrypted under the offset-`[64:80]` slot** — with
+   an identical blob on both sides those are different byte ranges of the
+   same data, so what one side encrypts with never matches what the peer
+   tries to decrypt with. Fix: the two sides' 80-byte blobs must be
+   constructed so `A`'s `[32:48]` (its decrypt key) equals whatever key `B`
+   used to encrypt *to* `A`, and vice versa — see `build_permit_key_material()`
+   in `engine.py`.
+
+2. **Wrong idea of what's actually being ECB-decrypted (still `err=18`).**
+   Live-hooking `SakeCrypto_AES_ECB_DecryptBlock` and
+   `SakeCrypto_VerifyMessageHF` during the actual failing round (not
+   reasoning about the decompile) showed the AES key/block/output registers
+   directly: the wire payload arrives as a raw 16-byte value at the outer
+   session-decrypted layer, and `SakeClient_DecryptValidateServerPermitHF`
+   ECB-decrypts *that* using the receiver's own `[32:48]` key — confirming
+   point 1's model was right, but only once the key routing itself
+   (encrypt-key = *peer's* decrypt-key, not your own) was fixed did the ECB
+   layer recover the intended plaintext at all.
+
+3. **The real killer: decompiler misread a computed checksum as a hardcoded
+   zero.** Even with (1) and (2) fixed, and the ECB layer now recovering
+   exactly the intended plaintext, the handshake still failed. Ghidra's
+   *decompile* of `SakeClient_DecryptValidateServerPermitHF` showed a check
+   that looked like `plaintext[12:16] == 0`. Reading the **disassembly**
+   directly (not the decompile) showed what's really compared:
+   `SakeCrypto_VerifyMessageHF(mac_key, plaintext[0:12], 12)` computes a
+   CMAC-style value into a *separate* stack slot, and the real check is
+   `plaintext[12:16] == cmac_output[0:4]` — the permit's last 4 bytes are a
+   **self-consistency checksum over its own first 12 bytes**, not padding.
+   `build_permit_plaintext()` in `engine.py` computes this the only reliable
+   way: by calling the real `SakeCrypto_VerifyMessageHF` itself, not by
+   guessing the MAC construction.
+
+   This is the third time in this project that Ghidra's C decompile of this
+   library has actively misled rather than merely under-informed (see the
+   three harness bugs above, and `GetEntryByType`'s off-by-`0x51` misread in
+   the connector-history-adjacent notes) — every one of them was only
+   resolved by either running the real code or reading raw disassembly.
+   Treat this library's decompile as a *hypothesis*, always.
+
+Full validated permit-field layout (`SakeClient_DecryptValidateServerPermitHF`,
+`0x16f58`, confirmed via disassembly at `0x16f58`-`0x16fee`):
+
+```
+byte 0      : 0x00, required (a "status" byte)
+byte 1      : sender's device type (checked against SakeError_IsValidCode)
+bytes 2:12  : "proprietary bytes" (unvalidated payload)
+bytes 12:16 : SakeCrypto_VerifyMessageHF(mac_key, bytes[0:12])[0:4]
+```
+
+And the per-peer 80-byte key-database entry layout
+(`ClientHandshake_State7FinalizeEncrypt` @ `0x16438`,
+`ServerHandshake_State5DecryptPermit` @ `0x17530`):
+
+```
+[0:32]  unused by the permit path
+[32:48] this side's AES-ECB key for decrypting an incoming permit
+[48:64] this side's CMAC key for verifying an incoming permit's checksum
+[64:80] AES_ECB_Encrypt(this side's own permit plaintext, using the
+        PEER's [32:48] key) -- embedded as this side's outgoing permit
+```
+
+### What's real vs. synthetic here
+
+The SRP-6a core, the KDF, the AES-ECB/CMAC primitives, and the entire
+handshake state machine above are the **real library**, byte-exact. What's
+*not* real in `selftest_full_handshake.py`: the four 16-byte identity
+secrets (`K_CLIENT_DECRYPT`/`K_SERVER_DECRYPT`/`MAC_CLIENT`/`MAC_SERVER`)
+are placeholder values invented for the self-test, not a real pump's
+provisioned key material. A real pump's `SAKE_KEY_DATABASE_S` entries carry
+real, pump-specific secrets — most likely provisioned via the IDD Secure
+Control Point (`0x0109`) / `PublicKeyExchangeApiImpl` flow this project's
+`Documentation` repo describes, which is the actual candidate for *how* a
+real phone obtains this material during pairing. That flow is not yet
+connected to this engine — see `PythonPumpConnector`'s `idd/secure_control.py`
+and its docstring for the reverse-engineered wire format of that
+characteristic.
+
+### Using this from other code
+
+`engine.py` exposes `SakeV2Client`/`SakeV2Server` classes
+(`.step(incoming_bytes_or_None) -> reply_bytes_or_None`, `.is_done`,
+`.secure_link`, `.last_error`) plus the permit/key-database builder
+functions, all driving the real library underneath. This is what
+`PythonPumpConnector`'s `--sake-v2` path should be wired to next, once real
+per-pump identity secrets are available.
